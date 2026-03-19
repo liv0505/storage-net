@@ -1,0 +1,15 @@
+﻿__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.pytest_tmp/
+.tmp/
+.tmp_tests/
+.tmp_tests_manual/
+tmp_manual/
+tmp_pytest/
+pytest-cache-files-*/
+outputs/
+outputs_plan_check/
+outputs_dashboard_layout_check/
+debug.log

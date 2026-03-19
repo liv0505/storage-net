@@ -1,0 +1,342 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SSU Topology Analysis Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root {
+      --bg: #020617;
+      --bg-soft: #0f172a;
+      --card: #111827;
+      --card-soft: #0b1220;
+      --ink: #e5eef9;
+      --muted: #95a3b8;
+      --line: rgba(148, 163, 184, 0.18);
+      --cyan: #38bdf8;
+      --emerald: #34d399;
+      --amber: #f59e0b;
+      --rose: #fb7185;
+      --shadow: 0 18px 45px rgba(0, 0, 0, 0.44);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 26%),
+        radial-gradient(circle at 85% 12%, rgba(251, 113, 133, 0.12), transparent 24%),
+        linear-gradient(180deg, #01030a, var(--bg));
+      color: var(--ink);
+      font-family: "Space Grotesk", "Segoe UI", sans-serif;
+      min-height: 100vh;
+      padding: 18px 16px 48px;
+    }
+
+    .container {
+      max-width: 1480px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, rgba(8, 15, 29, 0.96), rgba(15, 23, 42, 0.92));
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 16px 18px;
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(24px, 3.4vw, 34px);
+      letter-spacing: 0.3px;
+    }
+
+    .hero p {
+      margin: 8px 0 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--muted);
+      max-width: 1080px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .plot-card {
+      background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(9, 14, 27, 0.96));
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .plot-card-dark {
+      background: linear-gradient(180deg, rgba(7, 10, 18, 0.98), rgba(15, 23, 42, 0.98));
+    }
+
+    .plot-card-head {
+      padding: 18px 20px 10px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+    }
+
+    .plot-card-head h2 {
+      margin: 0;
+      font-size: 26px;
+    }
+
+    .eyebrow {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.34px;
+    }
+
+    .plot-shell {
+      padding: 14px 14px 4px;
+    }
+
+    .plot-shell h3,
+    .detail-pane h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.42px;
+      color: var(--cyan);
+    }
+
+    .plot-frame {
+      border: 1px solid rgba(56, 189, 248, 0.16);
+      border-radius: 18px;
+      background: rgba(2, 6, 23, 0.92);
+      padding: 8px;
+    }
+
+    .plot-caption {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .plot-caption span {
+      display: block;
+      padding: 9px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      background: rgba(15, 23, 42, 0.72);
+    }
+
+    .detail-pane {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr;
+      gap: 14px;
+      padding: 8px 14px 16px;
+      align-items: start;
+    }
+
+    .section {
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      border-radius: 18px;
+      padding: 14px;
+      background: rgba(15, 23, 42, 0.7);
+      min-height: 100%;
+    }
+
+    .metrics-grid,
+    .kv-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(130px, 1fr));
+      gap: 10px;
+    }
+
+    .metric,
+    .kv {
+      border-radius: 14px;
+      padding: 10px 11px;
+      background: rgba(2, 6, 23, 0.86);
+      border: 1px solid rgba(148, 163, 184, 0.1);
+    }
+
+    .metric .k,
+    .kv .k {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.42px;
+      color: var(--muted);
+    }
+
+    .metric .v,
+    .kv .v {
+      display: block;
+      margin-top: 4px;
+      line-height: 1.45;
+      font-weight: 600;
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .workload-panel {
+      border-radius: 16px;
+      padding: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.1);
+      background: rgba(2, 6, 23, 0.86);
+    }
+
+    .workload-panel h4 {
+      margin: 0 0 10px;
+      color: var(--amber);
+      font-size: 14px;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .small-notes,
+    .small-notes li {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .interaction-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(52, 211, 153, 0.24);
+      background: rgba(52, 211, 153, 0.08);
+      color: #d1fae5;
+      font-size: 11px;
+      letter-spacing: 0.2px;
+    }
+
+    @media (max-width: 1180px) {
+      .detail-pane { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 720px) {
+      body { padding: 12px 10px 34px; }
+      .plot-card-head { padding: 14px 14px 8px; }
+      .plot-shell { padding: 12px 12px 4px; }
+      .detail-pane { padding: 8px 12px 14px; }
+      .metrics-grid, .kv-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="hero">
+      <h1>SSU-Centric Topology Analysis Dashboard</h1>
+      <p>Topology figures are shown first for direct visual comparison. Each figure uses an explicit layered layout: SSUs at the bottom row, Unions above them, and topology-level structure arranged in deterministic grids instead of force-directed placement.</p>
+    </section>
+
+    <section class="grid">
+      {% for r in results %}
+      <article class="plot-card plot-card-dark" data-highlight-mode="{{ r.interaction_mode }}">
+        <div class="plot-card-head">
+          <h2>{{ r.name }}</h2>
+          <div class="eyebrow">{{ r.topology.scale }} | {{ r.topology.exchange_node_count }} exchange nodes</div>
+          <div class="interaction-chip">Click a node to highlight one-hop neighbors and incident links</div>
+        </div>
+
+        <div class="plot-shell">
+          <h3>Topology Figure</h3>
+          <div class="plot-frame">{{ r.plot_html | safe }}</div>
+          <div class="plot-caption small-notes">
+            {% for note in r.layout_notes %}
+            <span>{{ note }}</span>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="detail-pane">
+          <section class="section">
+            <h3>Key Metrics</h3>
+            <div class="stack">
+              <div class="metrics-grid">
+                <div class="metric"><span class="k">Diameter</span><span class="v">{{ '%.0f'|format(r.structural_metrics.diameter) }}</span></div>
+                <div class="metric"><span class="k">Average Hops</span><span class="v">{{ '%.2f'|format(r.structural_metrics.average_hops) }}</span></div>
+                <div class="metric"><span class="k">Bisection Bandwidth</span><span class="v">{{ '%.1f'|format(r.structural_metrics.bisection_bandwidth_gbps) }} Gbps</span></div>
+                <div class="metric"><span class="k">Backend Links</span><span class="v">{{ r.topology.backend_link_count }}</span></div>
+              </div>
+              <div class="workload-panel">
+                <h4>A2A Per SSU Throughput</h4>
+                <div class="metrics-grid">
+                  <div class="metric"><span class="k">Throughput</span><span class="v">{{ '%.2f'|format(r.communication_metrics['A2A'].per_ssu_throughput_gbps) }} Gbps</span></div>
+                  <div class="metric"><span class="k">Completion</span><span class="v">{{ '%.2f'|format(r.communication_metrics['A2A'].completion_time_s * 1e3) }} ms</span></div>
+                  <div class="metric"><span class="k">P95 Completion</span><span class="v">{{ '%.2f'|format(r.communication_metrics['A2A'].completion_time_p95_s * 1e3) }} ms</span></div>
+                  <div class="metric"><span class="k">Max Link Util.</span><span class="v">{{ '%.2f'|format(r.communication_metrics['A2A'].max_link_utilization * 100) }}%</span></div>
+                </div>
+              </div>
+              <div class="workload-panel">
+                <h4>Sparse 1-to-N</h4>
+                <div class="metrics-grid">
+                  <div class="metric"><span class="k">Throughput</span><span class="v">{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].per_ssu_throughput_gbps) }} Gbps</span></div>
+                  <div class="metric"><span class="k">Completion</span><span class="v">{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_s * 1e3) }} ms</span></div>
+                  <div class="metric"><span class="k">P95 Completion</span><span class="v">{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_p95_s * 1e3) }} ms</span></div>
+                  <div class="metric"><span class="k">Link CV</span><span class="v">{{ '%.3f'|format(r.communication_metrics['Sparse 1-to-N'].link_utilization_cv) }}</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <h3>Routing Mode</h3>
+            <div class="kv-grid">
+              <div class="kv"><span class="k">Active Mode</span><span class="v">{{ r.routing.mode }}</span></div>
+              <div class="kv"><span class="k">Backend Pattern</span><span class="v">{{ r.topology.backend_pattern }}</span></div>
+              <div class="kv"><span class="k">Message Size</span><span class="v">{{ '%.2f'|format(r.workloads.message_size_mb) }} MB</span></div>
+              <div class="kv"><span class="k">Sparse Active Ratio</span><span class="v">{{ '%.0f'|format(r.workloads.sparse_active_ratio * 100) }}%</span></div>
+              <div class="kv"><span class="k">Sparse Target Count</span><span class="v">{{ r.workloads.sparse_target_count }}</span></div>
+              <div class="kv"><span class="k">A2A Scope</span><span class="v">{{ r.workloads.a2a_scope }}</span></div>
+            </div>
+          </section>
+
+          <section class="section small-notes">
+            <h3>Analysis Notes</h3>
+            <ul>
+              {% for note in r.routing.notes %}
+              <li>{{ note }}</li>
+              {% endfor %}
+              {% for note in r.observations %}
+              <li>{{ note }}</li>
+              {% endfor %}
+            </ul>
+          </section>
+        </div>
+      </article>
+      {% endfor %}
+    </section>
+  </div>
+
+  <script>
+    function registerTopologyHighlight() {
+      return true;
+    }
+  </script>
+  {% for r in results %}
+  <script>
+    {{ r.interaction_script | safe }}
+  </script>
+  {% endfor %}
+</body>
+</html>
