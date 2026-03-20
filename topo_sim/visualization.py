@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -74,7 +74,14 @@ def _exchange_grid_positions_3d() -> dict[str, tuple[float, float]]:
     return positions
 
 
-def _exchange_grid_positions_clos() -> dict[str, tuple[float, float]]:
+def _clos_spine_sort_key(node_id: str) -> tuple[int, int]:
+    parts = str(node_id).split("_")
+    plane = next((int(part.removeprefix("plane")) for part in parts if part.startswith("plane")), 0)
+    uplink = next((int(part.removeprefix("uplink")) for part in parts if part.startswith("uplink")), 0)
+    return plane, uplink
+
+
+def _exchange_grid_positions_clos(g: nx.Graph) -> dict[str, tuple[float, float]]:
     positions: dict[str, tuple[float, float]] = {}
     cols = 6
     cell_x = 7.4
@@ -88,10 +95,20 @@ def _exchange_grid_positions_clos() -> dict[str, tuple[float, float]]:
         base_y = -(row * cell_y) - 2.8
         positions.update(_exchange_local_positions(base_x, base_y, exchange_id))
 
-    spine_y = 2.7
-    spine_spacing = 8.5
-    for spine_index in range(6):
-        positions[f"clos_spine_union{spine_index}"] = (spine_index * spine_spacing, spine_y)
+    spine_nodes = sorted(
+        [node_id for node_id, data in g.nodes(data=True) if data.get("node_role") == "clos_spine"],
+        key=_clos_spine_sort_key,
+    )
+    plane_spacing_y = 2.0
+    spine_spacing_x = 8.2
+    spine_origin_x = 8.5
+    spine_origin_y = 3.2
+    for node_id in spine_nodes:
+        plane, uplink = _clos_spine_sort_key(node_id)
+        positions[node_id] = (
+            spine_origin_x + (uplink * spine_spacing_x),
+            spine_origin_y + (plane * plane_spacing_y),
+        )
 
     return positions
 
@@ -102,7 +119,7 @@ def _explicit_positions(topology_name: str, g: nx.Graph) -> dict[Any, tuple[floa
     if topology_name == "3D-Torus":
         return _exchange_grid_positions_3d()
     if topology_name == "Clos":
-        return _exchange_grid_positions_clos()
+        return _exchange_grid_positions_clos(g)
     return None
 
 
@@ -172,6 +189,7 @@ def _build_interaction_payload(
     node_points: dict[str, Any] = {}
     neighbors: dict[str, list[str]] = {}
     incident_edges: dict[str, list[list[float | None]]] = {}
+    incident_link_labels: dict[str, list[dict[str, Any]]] = {}
 
     for node_id in node_ids:
         node_data = g.nodes[node_id]
@@ -193,16 +211,29 @@ def _build_interaction_payload(
         neighbors[node_id] = [str(neighbor) for neighbor in g.neighbors(node_id)]
 
         edge_segments: list[list[float | None]] = []
+        label_items: list[dict[str, Any]] = []
         for neighbor in g.neighbors(node_id):
             x0, y0 = pos[node_id]
             x1, y1 = pos[neighbor]
             edge_segments.append([x0, x1, None, y0, y1, None])
+            edge_data = g.get_edge_data(node_id, neighbor) or {}
+            bandwidth = float(edge_data.get("bandwidth_gbps", 0.0))
+            label_items.append(
+                {
+                    "x": (x0 + x1) / 2.0,
+                    "y": (y0 + y1) / 2.0,
+                    "text": f"{bandwidth:.0f} Gbps",
+                    "bandwidth_gbps": bandwidth,
+                }
+            )
         incident_edges[node_id] = edge_segments
+        incident_link_labels[node_id] = label_items
 
     return {
         "node_points": node_points,
         "neighbors": neighbors,
         "incident_edges": incident_edges,
+        "incident_link_labels": incident_link_labels,
     }
 
 
@@ -237,7 +268,7 @@ def _interaction_script(plot_id: str, payload: dict[str, Any]) -> str:
   function resetHighlight() {{
     Plotly.restyle(plot, {{opacity: 1}}, [0, 1, 3]);
     Plotly.restyle(plot, {{x: [[]], y: [[]]}}, [2]);
-    Plotly.restyle(plot, {{x: [[]], y: [[]], text: [[]], customdata: [[]]}}, [4]);
+    Plotly.restyle(plot, {{x: [[]], y: [[]], text: [[]], customdata: [[]]}}, [4, 5]);
     const defaultOpacity = interaction.baseNodeIds.map(() => 1);
     Plotly.restyle(plot, {{'marker.opacity': [defaultOpacity]}}, [3]);
     plot.dataset.activeNodeId = '';
@@ -247,6 +278,7 @@ def _interaction_script(plot_id: str, payload: dict[str, Any]) -> str:
     const activeIds = [nodeId].concat(interaction.neighbors[nodeId] || []);
     const edgeSegments = interaction.incident_edges[nodeId] || [];
     const flatEdges = flattenEdgeSegments(edgeSegments);
+    const linkLabels = interaction.incident_link_labels[nodeId] || [];
     const highlightPoints = activeIds.map((id) => interaction.node_points[id]).filter(Boolean);
 
     Plotly.restyle(plot, {{opacity: 0.14}}, [0, 1]);
@@ -255,11 +287,17 @@ def _interaction_script(plot_id: str, payload: dict[str, Any]) -> str:
     Plotly.restyle(plot, {{'marker.opacity': [nodeOpacity]}}, [3]);
     Plotly.restyle(plot, {{x: [flatEdges.x], y: [flatEdges.y]}}, [2]);
     Plotly.restyle(plot, {{
+      x: [linkLabels.map((item) => item.x)],
+      y: [linkLabels.map((item) => item.y)],
+      text: [linkLabels.map((item) => item.text)],
+      customdata: [linkLabels.map((item) => item.bandwidth_gbps)]
+    }}, [4]);
+    Plotly.restyle(plot, {{
       x: [highlightPoints.map((item) => item.x)],
       y: [highlightPoints.map((item) => item.y)],
       text: [highlightPoints.map((item) => item.text)],
       customdata: [activeIds]
-    }}, [4]);
+    }}, [5]);
     plot.dataset.activeNodeId = nodeId;
   }}
 
@@ -318,6 +356,18 @@ def create_topology_figure(
         showlegend=False,
         name="highlight-edges",
     )
+    highlight_edge_labels = go.Scatter(
+        x=[],
+        y=[],
+        mode="text",
+        text=[],
+        customdata=[],
+        textposition="top center",
+        textfont=dict(color="#fde68a", size=11, family="Space Grotesk, Segoe UI, sans-serif"),
+        hovertemplate="%{customdata:.0f} Gbps<extra></extra>",
+        showlegend=False,
+        name="highlight-edge-labels",
+    )
 
     node_ids = [str(node_id) for node_id in g.nodes()]
     node_x = []
@@ -375,7 +425,9 @@ def create_topology_figure(
         f"Sparse P95: {sparse['completion_time_p95_s'] * 1e3:.2f} ms"
     )
 
-    fig = go.Figure(data=[internal_edges, backend_edges, highlight_edges, base_nodes, highlight_nodes])
+    fig = go.Figure(
+        data=[internal_edges, backend_edges, highlight_edges, base_nodes, highlight_edge_labels, highlight_nodes]
+    )
     fig.update_layout(
         title=f"{title}<br><sup>{subtitle}</sup>",
         template="plotly_dark",
@@ -417,9 +469,12 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
                 "hardware": item["hardware"],
                 "topology": item["topology"],
                 "routing": item["routing"],
+                "routing_diversity": item.get("routing_diversity"),
                 "workloads": item["workloads"],
                 "structural_metrics": item["structural_metrics"],
                 "communication_metrics": item["communication_metrics"],
+                "default_routing_highlight": item.get("default_routing_highlight"),
+                "routing_comparison": item.get("routing_comparison"),
                 "observations": item["observations"],
                 "layout_notes": _layout_notes(item["name"]),
                 "plot_id": plot_id,
@@ -436,5 +491,5 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
 
     html = template.render(results=blocks)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(html, encoding="utf-8")
+    output_path.write_text(html, encoding='utf-8')
     return output_path

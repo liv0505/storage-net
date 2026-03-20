@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -36,7 +36,7 @@
     }
 
     .container {
-      max-width: 1480px;
+      max-width: 1520px;
       margin: 0 auto;
     }
 
@@ -60,7 +60,7 @@
       font-size: 13px;
       line-height: 1.55;
       color: var(--muted);
-      max-width: 1080px;
+      max-width: 1120px;
     }
 
     .grid {
@@ -139,7 +139,7 @@
 
     .detail-pane {
       display: grid;
-      grid-template-columns: 1.2fr 1fr 1fr;
+      grid-template-columns: 1.05fr 1.35fr 0.9fr;
       gap: 14px;
       padding: 8px 14px 16px;
       align-items: start;
@@ -190,29 +190,62 @@
       gap: 12px;
     }
 
-    .workload-panel {
+    .workload-panel,
+    .compact-table-panel {
       border-radius: 16px;
       padding: 12px;
       border: 1px solid rgba(148, 163, 184, 0.1);
       background: rgba(2, 6, 23, 0.86);
     }
 
-    .workload-panel h4 {
+    .workload-panel h4,
+    .compact-table-panel h4 {
       margin: 0 0 10px;
       color: var(--amber);
       font-size: 14px;
     }
 
-    ul {
-      margin: 0;
-      padding-left: 18px;
+    .compact-table-wrap {
+      overflow-x: auto;
+    }
+
+    .compact-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .compact-table th,
+    .compact-table td {
+      padding: 7px 8px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .compact-table th:first-child,
+    .compact-table td:first-child {
+      text-align: left;
+    }
+
+    .compact-table th {
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.32px;
     }
 
     .small-notes,
     .small-notes li {
       color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
+      font-size: 11.5px;
+      line-height: 1.45;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
     }
 
     .interaction-chip {
@@ -229,7 +262,7 @@
       letter-spacing: 0.2px;
     }
 
-    @media (max-width: 1180px) {
+    @media (max-width: 1280px) {
       .detail-pane { grid-template-columns: 1fr; }
     }
 
@@ -255,7 +288,7 @@
         <div class="plot-card-head">
           <h2>{{ r.name }}</h2>
           <div class="eyebrow">{{ r.topology.scale }} | {{ r.topology.exchange_node_count }} exchange nodes</div>
-          <div class="interaction-chip">Click a node to highlight one-hop neighbors and incident links</div>
+          <div class="interaction-chip">Click a node to highlight one-hop neighbors, incident links, and link bandwidth</div>
         </div>
 
         <div class="plot-shell">
@@ -279,21 +312,11 @@
                 <div class="metric"><span class="k">Backend Links</span><span class="v">{{ r.topology.backend_link_count }}</span></div>
               </div>
               <div class="workload-panel">
-                <h4>A2A Per SSU Throughput</h4>
+                <h4>Default Route Throughput</h4>
+                <div class="small-notes" style="margin-bottom:10px;">A2A Per SSU Throughput and sparse per-SSU throughput are shown for the default route only.</div>
                 <div class="metrics-grid">
-                  <div class="metric"><span class="k">Throughput</span><span class="v">{{ '%.2f'|format(r.communication_metrics['A2A'].per_ssu_throughput_gbps) }} Gbps</span></div>
-                  <div class="metric"><span class="k">Completion</span><span class="v">{{ '%.2f'|format(r.communication_metrics['A2A'].completion_time_s * 1e3) }} ms</span></div>
-                  <div class="metric"><span class="k">P95 Completion</span><span class="v">{{ '%.2f'|format(r.communication_metrics['A2A'].completion_time_p95_s * 1e3) }} ms</span></div>
-                  <div class="metric"><span class="k">Max Link Util.</span><span class="v">{{ '%.2f'|format(r.communication_metrics['A2A'].max_link_utilization * 100) }}%</span></div>
-                </div>
-              </div>
-              <div class="workload-panel">
-                <h4>Sparse 1-to-N</h4>
-                <div class="metrics-grid">
-                  <div class="metric"><span class="k">Throughput</span><span class="v">{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].per_ssu_throughput_gbps) }} Gbps</span></div>
-                  <div class="metric"><span class="k">Completion</span><span class="v">{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_s * 1e3) }} ms</span></div>
-                  <div class="metric"><span class="k">P95 Completion</span><span class="v">{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_p95_s * 1e3) }} ms</span></div>
-                  <div class="metric"><span class="k">Link CV</span><span class="v">{{ '%.3f'|format(r.communication_metrics['Sparse 1-to-N'].link_utilization_cv) }}</span></div>
+                  <div class="metric"><span class="k">{{ r.default_routing_highlight.label }}</span><span class="v">A2A {{ '%.2f'|format(r.default_routing_highlight.a2a_per_ssu_throughput_gbps) }} Gbps</span></div>
+                  <div class="metric"><span class="k">{{ r.default_routing_highlight.label }}</span><span class="v">Sparse {{ '%.2f'|format(r.default_routing_highlight.sparse_per_ssu_throughput_gbps) }} Gbps</span></div>
                 </div>
               </div>
             </div>
@@ -301,13 +324,103 @@
 
           <section class="section">
             <h3>Routing Mode</h3>
-            <div class="kv-grid">
-              <div class="kv"><span class="k">Active Mode</span><span class="v">{{ r.routing.mode }}</span></div>
-              <div class="kv"><span class="k">Backend Pattern</span><span class="v">{{ r.topology.backend_pattern }}</span></div>
-              <div class="kv"><span class="k">Message Size</span><span class="v">{{ '%.2f'|format(r.workloads.message_size_mb) }} MB</span></div>
-              <div class="kv"><span class="k">Sparse Active Ratio</span><span class="v">{{ '%.0f'|format(r.workloads.sparse_active_ratio * 100) }}%</span></div>
-              <div class="kv"><span class="k">Sparse Target Count</span><span class="v">{{ r.workloads.sparse_target_count }}</span></div>
-              <div class="kv"><span class="k">A2A Scope</span><span class="v">{{ r.workloads.a2a_scope }}</span></div>
+            <div class="stack">
+              <div class="kv-grid">
+                <div class="kv"><span class="k">Active Mode</span><span class="v">{{ r.routing.mode }}</span></div>
+                <div class="kv"><span class="k">Backend Pattern</span><span class="v">{{ r.topology.backend_pattern }}</span></div>
+                <div class="kv"><span class="k">Message Size</span><span class="v">{{ '%.2f'|format(r.workloads.message_size_mb) }} MB</span></div>
+                <div class="kv"><span class="k">Sparse Active Ratio</span><span class="v">{{ '%.0f'|format(r.workloads.sparse_active_ratio * 100) }}%</span></div>
+                <div class="kv"><span class="k">Sparse Target Count</span><span class="v">{{ r.workloads.sparse_target_count }}</span></div>
+                <div class="kv"><span class="k">A2A Scope</span><span class="v">{{ r.workloads.a2a_scope }}</span></div>
+              </div>
+              {% if r.routing_diversity %}
+              <div class="workload-panel">
+                <h4>Routing Diversity Snapshot</h4>
+                <div class="small-notes" style="margin-bottom:10px;">{{ r.routing_diversity.summary }}</div>
+                <div class="metrics-grid">
+                  {% for item in r.routing_diversity.modes %}
+                  <div class="metric">
+                    <span class="k">{{ item.mode }}</span>
+                    <span class="v">Avg {{ '%.2f'|format(item.avg_path_count) }} | Peak {{ item.max_path_count }}</span>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endif %}
+              {% if r.routing_comparison %}
+                {% for section in r.routing_comparison.sections %}
+                <div class="compact-table-panel">
+                  <h4>{{ section.title }}</h4>
+                  <div class="compact-table-wrap">
+                    <table class="compact-table">
+                      <thead>
+                        <tr>
+                          <th>Mode</th>
+                          {% for column in r.routing_comparison.columns %}
+                          <th>{{ column.label }}</th>
+                          {% endfor %}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for row in section.rows %}
+                        <tr>
+                          <td>{{ row.mode }}</td>
+                          {% for column in r.routing_comparison.columns %}
+                            {% set value = row[column.key] %}
+                            {% if column.key == 'per_ssu_throughput_gbps' %}
+                            <td>{{ '%.2f'|format(value) }} Gbps</td>
+                            {% elif column.key in ['completion_time_s', 'completion_time_p95_s'] %}
+                            <td>{{ '%.4f'|format(value) }} s</td>
+                            {% elif column.key == 'max_link_utilization' %}
+                            <td>{{ '%.2f'|format(value * 100) }}%</td>
+                            {% else %}
+                            <td>{{ '%.3f'|format(value) }}</td>
+                            {% endif %}
+                          {% endfor %}
+                        </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                {% endfor %}
+              {% else %}
+              <div class="compact-table-panel">
+                <h4>ECMP Workload Summary</h4>
+                <div class="compact-table-wrap">
+                  <table class="compact-table">
+                    <thead>
+                      <tr>
+                        <th>Workload</th>
+                        <th>Per SSU Throughput</th>
+                        <th>Completion Time</th>
+                        <th>P95 Completion</th>
+                        <th>Max Link Utilization</th>
+                        <th>Link Utilization CV</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>A2A</td>
+                        <td>{{ '%.2f'|format(r.communication_metrics['A2A'].per_ssu_throughput_gbps) }} Gbps</td>
+                        <td>{{ '%.4f'|format(r.communication_metrics['A2A'].completion_time_s) }} s</td>
+                        <td>{{ '%.4f'|format(r.communication_metrics['A2A'].completion_time_p95_s) }} s</td>
+                        <td>{{ '%.2f'|format(r.communication_metrics['A2A'].max_link_utilization * 100) }}%</td>
+                        <td>{{ '%.3f'|format(r.communication_metrics['A2A'].link_utilization_cv) }}</td>
+                      </tr>
+                      <tr>
+                        <td>Sparse 1-to-N</td>
+                        <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].per_ssu_throughput_gbps) }} Gbps</td>
+                        <td>{{ '%.4f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_s) }} s</td>
+                        <td>{{ '%.4f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_p95_s) }} s</td>
+                        <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].max_link_utilization * 100) }}%</td>
+                        <td>{{ '%.3f'|format(r.communication_metrics['Sparse 1-to-N'].link_utilization_cv) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {% endif %}
             </div>
           </section>
 

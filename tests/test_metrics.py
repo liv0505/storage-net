@@ -63,3 +63,54 @@ def test_backend_utilization_metrics_ignore_internal_only_routes():
     assert result["link_utilization_cv"] == 0.0
     assert result["completion_time_p50_s"] >= 0
     assert result["completion_time_p95_s"] >= 0
+
+
+@pytest.mark.parametrize("routing_mode", ["DOR", "FULL_PATH"])
+def test_direct_projection_fast_path_matches_explicit_paths_for_repeated_exchange_pairs(monkeypatch, routing_mode: str):
+    import topo_sim.metrics as metrics_module
+
+    cfg = AnalysisConfig()
+    g = build_topology("2D-Torus", cfg)
+    demands = [
+        FlowDemand(src="en0:ssu0", dst="en5:ssu0", bits=_message_bits(cfg)),
+        FlowDemand(src="en0:ssu1", dst="en5:ssu2", bits=_message_bits(cfg)),
+        FlowDemand(src="en0:ssu2", dst="en5:ssu3", bits=_message_bits(cfg)),
+    ]
+
+    fast = evaluate_workload(g, demands, routing_mode=routing_mode, cfg=cfg)
+
+    monkeypatch.setattr(
+        metrics_module,
+        "_should_use_direct_projection_fast_path",
+        lambda _g, _routing_mode: False,
+    )
+    explicit = evaluate_workload(g, demands, routing_mode=routing_mode, cfg=cfg)
+
+    assert fast == pytest.approx(explicit)
+
+
+@pytest.mark.parametrize("routing_mode", ["DOR", "FULL_PATH"])
+def test_direct_projection_fast_path_reuses_exchange_pair_routes(monkeypatch, routing_mode: str):
+    import topo_sim.metrics as metrics_module
+
+    cfg = AnalysisConfig()
+    g = build_topology("2D-Torus", cfg)
+    demands = [
+        FlowDemand(src="en0:ssu0", dst="en5:ssu0", bits=_message_bits(cfg)),
+        FlowDemand(src="en0:ssu1", dst="en5:ssu2", bits=_message_bits(cfg)),
+        FlowDemand(src="en0:ssu2", dst="en5:ssu3", bits=_message_bits(cfg)),
+    ]
+
+    observed_calls: list[tuple[str, str, str]] = []
+    original_compute_paths = metrics_module.compute_paths
+
+    def counting_compute_paths(g, src_ssu, dst_ssu, active_mode, active_cfg):
+        observed_calls.append((src_ssu, dst_ssu, active_mode))
+        return original_compute_paths(g, src_ssu, dst_ssu, active_mode, active_cfg)
+
+    monkeypatch.setattr(metrics_module, "compute_paths", counting_compute_paths)
+
+    result = evaluate_workload(g, demands, routing_mode=routing_mode, cfg=cfg)
+
+    assert result["per_ssu_throughput_gbps"] > 0
+    assert len(observed_calls) <= 1

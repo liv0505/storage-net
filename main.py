@@ -8,7 +8,14 @@ from topo_sim.config import AnalysisConfig
 from topo_sim.pipeline import run_full_analysis
 
 
-_SUPPORTED_ROUTING_MODES = ["DOR", "ECMP", "MIN_HOPS", "PORT_BALANCED"]
+_SUPPORTED_ROUTING_MODES = [
+    "DOR",
+    "SHORTEST_PATH",
+    "FULL_PATH",
+    "ECMP",
+    "MIN_HOPS",
+    "PORT_BALANCED",
+]
 
 
 def _sparse_ratio_arg(value: str) -> float:

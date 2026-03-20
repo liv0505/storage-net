@@ -36,7 +36,7 @@ def test_parse_args_accepts_new_topology_names(monkeypatch):
     assert args.sparse_active_ratio == 0.5
 
 
-@pytest.mark.parametrize("routing_mode", ["DOR", "ECMP", "MIN_HOPS", "PORT_BALANCED"])
+@pytest.mark.parametrize("routing_mode", ["DOR", "ECMP", "SHORTEST_PATH", "FULL_PATH", "MIN_HOPS", "PORT_BALANCED"])
 def test_parse_args_accepts_supported_routing_modes(monkeypatch, routing_mode):
     monkeypatch.setattr("sys.argv", ["main.py", "--routing-mode", routing_mode])
     args = parse_args()
@@ -124,7 +124,7 @@ def test_main_passes_cli_values_into_config_and_run_full_analysis(monkeypatch):
     def fake_parse_args() -> argparse.Namespace:
         return argparse.Namespace(
             topologies="2D-FullMesh,Clos",
-            routing_mode="PORT_BALANCED",
+            routing_mode="FULL_PATH",
             sparse_active_ratio=0.5,
             sparse_target_count=3,
             port_balanced_max_detour_hops=2,
@@ -157,4 +157,5 @@ def test_main_passes_cli_values_into_config_and_run_full_analysis(monkeypatch):
     assert cfg.sparse_target_count == 3
     assert cfg.port_balanced_max_detour_hops == 2
     assert cfg.clos_uplinks_per_exchange_node == 4
-    assert cfg.routing_mode == "PORT_BALANCED"
+    assert cfg.routing_mode == "FULL_PATH"
+

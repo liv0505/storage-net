@@ -9,7 +9,7 @@ class AnalysisConfig:
     topology_names: list[str] = field(
         default_factory=lambda: ["2D-FullMesh", "2D-Torus", "3D-Torus", "Clos"]
     )
-    routing_mode: str = "MIN_HOPS"
+    routing_mode: str = "SHORTEST_PATH"
     sparse_active_ratio: float = 0.25
     sparse_target_count: int = 2
     port_balanced_max_detour_hops: int = 1

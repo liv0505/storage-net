@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable
@@ -8,7 +8,18 @@ import networkx as nx
 from .config import AnalysisConfig
 
 
-_SUPPORTED_ROUTING_MODES = {"DOR", "PORT_BALANCED", "ECMP", "MIN_HOPS"}
+_ROUTING_ALIASES = {
+    "MIN_HOPS": "SHORTEST_PATH",
+    "PORT_BALANCED": "FULL_PATH",
+}
+
+_SUPPORTED_ROUTING_MODES = {
+    "DOR",
+    "SHORTEST_PATH",
+    "FULL_PATH",
+    "ECMP",
+    *_ROUTING_ALIASES.keys(),
+}
 
 
 @dataclass(slots=True)
@@ -21,6 +32,16 @@ class RoutedPath:
         return max(0, len(self.nodes) - 1)
 
 
+def normalize_routing_mode(routing_mode: str) -> str:
+    if not isinstance(routing_mode, str):
+        raise ValueError("routing_mode must be a string")
+
+    mode = routing_mode.strip().upper()
+    if mode not in _SUPPORTED_ROUTING_MODES:
+        raise ValueError(f"Unsupported routing mode: {routing_mode}")
+    return _ROUTING_ALIASES.get(mode, mode)
+
+
 def compute_paths(
     g: nx.Graph,
     src_ssu: str,
@@ -28,12 +49,7 @@ def compute_paths(
     routing_mode: str,
     cfg: AnalysisConfig,
 ) -> list[RoutedPath]:
-    if not isinstance(routing_mode, str):
-        raise ValueError("routing_mode must be a string")
-
-    mode = routing_mode.strip().upper()
-    if mode not in _SUPPORTED_ROUTING_MODES:
-        raise ValueError(f"Unsupported routing mode: {routing_mode}")
+    mode = normalize_routing_mode(routing_mode)
 
     if src_ssu not in g or dst_ssu not in g:
         return []
@@ -50,11 +66,11 @@ def compute_paths(
     try:
         if mode == "DOR":
             return _compute_dor_paths(g, src_ssu, dst_ssu)
-        if mode == "PORT_BALANCED":
-            return _compute_port_balanced_paths(g, src_ssu, dst_ssu, cfg)
-        if mode == "ECMP":
-            return _compute_ecmp_paths(g, src_ssu, dst_ssu)
-        return _compute_min_hops_path(g, src_ssu, dst_ssu)
+        if mode == "SHORTEST_PATH":
+            return _compute_dual_plane_shortest_paths(g, src_ssu, dst_ssu)
+        if mode == "FULL_PATH":
+            return _compute_dual_plane_full_paths(g, src_ssu, dst_ssu)
+        return _compute_ecmp_paths(g, src_ssu, dst_ssu)
     except nx.NetworkXNoPath:
         return []
 
@@ -113,49 +129,193 @@ def _compute_ecmp_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedP
 
 
 def _compute_dor_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPath]:
-    if src_ssu == dst_ssu:
-        return [RoutedPath(nodes=(src_ssu,), weight=1.0)]
-
-    backend_roles = {
-        str(data.get("topology_role"))
-        for _, _, data in g.edges(data=True)
-        if data.get("link_kind") == "backend_interconnect"
-    }
+    topology_kind = _infer_direct_topology_kind(g)
+    if topology_kind not in {"2D-FULLMESH", "2D-TORUS", "3D-TORUS"}:
+        return _compute_dual_plane_shortest_paths(g, src_ssu, dst_ssu)
 
     src_exchange = _exchange_id(src_ssu)
     dst_exchange = _exchange_id(dst_ssu)
+    plane_paths: dict[str, list[tuple[str, ...]]] = {}
 
-    if src_exchange == dst_exchange:
-        return _compute_min_hops_path(g, src_ssu, dst_ssu)
+    for source_union in _source_union_ids(g, src_ssu):
+        union_label = _union_label(source_union)
+        plane_path = _compute_dor_backend_union_path(
+            g,
+            topology_kind=topology_kind,
+            src_exchange=src_exchange,
+            dst_exchange=dst_exchange,
+            union_label=union_label,
+        )
+        plane_paths[source_union] = [plane_path]
 
-    if {"2d_torus_x", "2d_torus_y"}.issubset(backend_roles):
+    return _weight_wrapped_plane_paths(src_ssu, dst_ssu, plane_paths)
+
+
+def _compute_dual_plane_shortest_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPath]:
+    if _infer_direct_topology_kind(g) is None:
+        return _compute_ecmp_paths(g, src_ssu, dst_ssu)
+
+    src_exchange = _exchange_id(src_ssu)
+    dst_exchange = _exchange_id(dst_ssu)
+    plane_paths: dict[str, list[tuple[str, ...]]] = {}
+
+    for source_union in _source_union_ids(g, src_ssu):
+        union_label = _union_label(source_union)
+        dst_union = f"{dst_exchange}:{union_label}"
+        plane_graph = _build_union_plane_graph(g, union_label)
+        shortest_paths = [tuple(path) for path in nx.all_shortest_paths(plane_graph, source_union, dst_union)]
+        plane_paths[source_union] = shortest_paths
+
+    return _weight_wrapped_plane_paths(src_ssu, dst_ssu, plane_paths)
+
+
+def _compute_dual_plane_full_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPath]:
+    if _infer_direct_topology_kind(g) is None:
+        return _compute_dual_plane_shortest_paths(g, src_ssu, dst_ssu)
+
+    src_exchange = _exchange_id(src_ssu)
+    dst_exchange = _exchange_id(dst_ssu)
+    plane_paths: dict[str, list[tuple[str, ...]]] = {}
+
+    for source_union in _source_union_ids(g, src_ssu):
+        union_label = _union_label(source_union)
+        dst_union = f"{dst_exchange}:{union_label}"
+        plane_graph = _build_union_plane_graph(g, union_label)
+        selected_paths: list[tuple[str, ...]] = []
+        seen: set[tuple[str, ...]] = set()
+
+        for egress_neighbor in sorted(plane_graph.neighbors(source_union)):
+            path = _least_hops_path_via_egress(plane_graph, source_union, dst_union, egress_neighbor)
+            if path is None or path in seen:
+                continue
+            seen.add(path)
+            selected_paths.append(path)
+
+        plane_paths[source_union] = selected_paths
+
+    return _weight_wrapped_plane_paths(src_ssu, dst_ssu, plane_paths)
+
+
+def _least_hops_path_via_egress(
+    plane_graph: nx.Graph,
+    source_union: str,
+    dst_union: str,
+    egress_neighbor: str,
+) -> tuple[str, ...] | None:
+    if not plane_graph.has_edge(source_union, egress_neighbor):
+        return None
+
+    if egress_neighbor == dst_union:
+        return (source_union, dst_union)
+
+    reduced = plane_graph.copy()
+    reduced.remove_node(source_union)
+
+    try:
+        suffix = nx.shortest_path(reduced, egress_neighbor, dst_union)
+    except nx.NetworkXNoPath:
+        return None
+
+    return tuple([source_union, *suffix])
+
+
+def _weight_wrapped_plane_paths(
+    src_ssu: str,
+    dst_ssu: str,
+    plane_paths: dict[str, list[tuple[str, ...]]],
+) -> list[RoutedPath]:
+    non_empty = [(source_union, paths) for source_union, paths in plane_paths.items() if paths]
+    if not non_empty:
+        return []
+
+    plane_weight = 1.0 / len(non_empty)
+    routed_paths: list[RoutedPath] = []
+
+    for _, backend_paths in non_empty:
+        per_path_weight = plane_weight / len(backend_paths)
+        for backend_path in backend_paths:
+            full_nodes = (src_ssu, *backend_path, dst_ssu)
+            routed_paths.append(RoutedPath(nodes=full_nodes, weight=per_path_weight))
+
+    return routed_paths
+
+
+def _build_union_plane_graph(g: nx.Graph, union_label: str) -> nx.Graph:
+    plane_nodes = {
+        node_id
+        for node_id, data in g.nodes(data=True)
+        if data.get("node_role") == "union" and _union_label(str(node_id)) == union_label
+    }
+    plane_graph = nx.Graph()
+    plane_graph.add_nodes_from(plane_nodes)
+
+    for u, v, data in g.edges(data=True):
+        if data.get("link_kind") != "backend_interconnect":
+            continue
+        if u in plane_nodes and v in plane_nodes:
+            plane_graph.add_edge(u, v, **data)
+
+    return plane_graph
+
+
+def _compute_dor_backend_union_path(
+    g: nx.Graph,
+    *,
+    topology_kind: str,
+    src_exchange: str,
+    dst_exchange: str,
+    union_label: str,
+) -> tuple[str, ...]:
+    if topology_kind == "2D-FULLMESH":
         size = _torus_side_length(_exchange_count(g), dimensions=2)
-        src_coord = _exchange_to_coord_2d(src_exchange, size)
+        current_coord = _exchange_to_coord_2d(src_exchange, size)
         dst_coord = _exchange_to_coord_2d(dst_exchange, size)
-        dims = ((1, "union0"), (0, "union1"))
+        current_union = f"{src_exchange}:{union_label}"
+        nodes: list[str] = [current_union]
+
+        if current_coord[1] != dst_coord[1]:
+            next_exchange = _coord_to_exchange_2d((current_coord[0], dst_coord[1]), size)
+            next_union = f"{next_exchange}:{union_label}"
+            if not g.has_edge(current_union, next_union):
+                raise ValueError(
+                    f"DOR expected backend edge missing between {current_union} and {next_union}"
+                )
+            nodes.append(next_union)
+            current_coord = (current_coord[0], dst_coord[1])
+            current_union = next_union
+
+        if current_coord[0] != dst_coord[0]:
+            next_exchange = _coord_to_exchange_2d((dst_coord[0], current_coord[1]), size)
+            next_union = f"{next_exchange}:{union_label}"
+            if not g.has_edge(current_union, next_union):
+                raise ValueError(
+                    f"DOR expected backend edge missing between {current_union} and {next_union}"
+                )
+            nodes.append(next_union)
+
+        return tuple(nodes)
+
+    if topology_kind == "2D-TORUS":
+        size = _torus_side_length(_exchange_count(g), dimensions=2)
+        current_coord = _exchange_to_coord_2d(src_exchange, size)
+        dst_coord = _exchange_to_coord_2d(dst_exchange, size)
+        axes = (1, 0)
         coord_to_exchange = lambda c: _coord_to_exchange_2d(c, size)
-    elif {"3d_torus_x", "3d_torus_y", "3d_torus_z"}.issubset(backend_roles):
-        size = _torus_side_length(_exchange_count(g), dimensions=3)
-        src_coord = _exchange_to_coord_3d(src_exchange, size)
-        dst_coord = _exchange_to_coord_3d(dst_exchange, size)
-        dims = ((0, "union0"), (1, "union1"), (2, "union0"))
-        coord_to_exchange = lambda c: _coord_to_exchange_3d(c, size)
     else:
-        # Fall back to shortest path when topology is not torus-shaped.
-        return _compute_min_hops_path(g, src_ssu, dst_ssu)
+        size = _torus_side_length(_exchange_count(g), dimensions=3)
+        current_coord = _exchange_to_coord_3d(src_exchange, size)
+        dst_coord = _exchange_to_coord_3d(dst_exchange, size)
+        axes = (0, 1, 2)
+        coord_to_exchange = lambda c: _coord_to_exchange_3d(c, size)
 
-    nodes: list[str] = [src_ssu]
-    current_node = src_ssu
     current_exchange = src_exchange
-    current_coord = tuple(src_coord)
+    current_union = f"{current_exchange}:{union_label}"
+    nodes: list[str] = [current_union]
 
-    for axis, union_label in dims:
+    for axis in axes:
         signed_steps = _torus_signed_steps(current_coord[axis], dst_coord[axis], size)
         if signed_steps == 0:
             continue
-
-        current_union = f"{current_exchange}:{union_label}"
-        current_node = _move_to_union(g, nodes, current_node, current_exchange, current_union)
 
         direction = 1 if signed_steps > 0 else -1
         for _ in range(abs(signed_steps)):
@@ -164,144 +324,48 @@ def _compute_dor_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPa
             next_coord_tuple = tuple(next_coord)
             next_exchange = coord_to_exchange(next_coord_tuple)
             next_union = f"{next_exchange}:{union_label}"
-
             if not g.has_edge(current_union, next_union):
                 raise ValueError(
                     f"DOR expected backend edge missing between {current_union} and {next_union}"
                 )
-
             nodes.append(next_union)
             current_coord = next_coord_tuple
             current_exchange = next_exchange
             current_union = next_union
-            current_node = next_union
 
-    if current_node != dst_ssu:
-        if not g.has_edge(current_node, dst_ssu):
-            raise ValueError(f"DOR could not reach destination SSU from {current_node} to {dst_ssu}")
-        nodes.append(dst_ssu)
-
-    return [RoutedPath(nodes=tuple(nodes), weight=1.0)]
+    return tuple(nodes)
 
 
-def _compute_port_balanced_paths(
-    g: nx.Graph,
-    src_ssu: str,
-    dst_ssu: str,
-    cfg: AnalysisConfig,
-) -> list[RoutedPath]:
-    if src_ssu == dst_ssu:
-        return [RoutedPath(nodes=(src_ssu,), weight=1.0)]
+def _infer_direct_topology_kind(g: nx.Graph) -> str | None:
+    backend_roles = {
+        str(data.get("topology_role"))
+        for _, _, data in g.edges(data=True)
+        if data.get("link_kind") == "backend_interconnect"
+    }
+    if {"2d_fullmesh_x", "2d_fullmesh_y"}.issubset(backend_roles):
+        return "2D-FULLMESH"
+    if {"2d_torus_x", "2d_torus_y"}.issubset(backend_roles):
+        return "2D-TORUS"
+    if {"3d_torus_x", "3d_torus_y", "3d_torus_z"}.issubset(backend_roles):
+        return "3D-TORUS"
+    return None
 
-    shortest_hops = nx.shortest_path_length(g, src_ssu, dst_ssu)
-    max_hops = shortest_hops + max(0, int(cfg.port_balanced_max_detour_hops))
 
-    source_unions = [
-        neighbor
+def _source_union_ids(g: nx.Graph, src_ssu: str) -> list[str]:
+    unions = [
+        str(neighbor)
         for neighbor in g.neighbors(src_ssu)
         if g.nodes[neighbor].get("node_role") == "union"
     ]
-
-    egress_ports: list[tuple[str, str]] = []
-    for source_union in source_unions:
-        for neighbor in g.neighbors(source_union):
-            edge = g.get_edge_data(source_union, neighbor) or {}
-            if edge.get("link_kind") != "backend_interconnect":
-                continue
-            egress_ports.append((source_union, neighbor))
-
-    selected_paths: list[tuple[str, ...]] = []
-    seen: set[tuple[str, ...]] = set()
-    for source_union, egress_neighbor in egress_ports:
-        path = _shortest_path_via_egress(g, src_ssu, dst_ssu, source_union, egress_neighbor)
-        if path is None:
-            continue
-        hops = len(path) - 1
-        if hops > max_hops:
-            continue
-        if path in seen:
-            continue
-        seen.add(path)
-        selected_paths.append(path)
-
-    if not selected_paths:
-        return _compute_min_hops_path(g, src_ssu, dst_ssu)
-
-    weight = 1.0 / len(selected_paths)
-    return [RoutedPath(nodes=path, weight=weight) for path in selected_paths]
+    return sorted(unions, key=_union_label)
 
 
-def _shortest_path_via_egress(
-    g: nx.Graph,
-    src_ssu: str,
-    dst_ssu: str,
-    source_union: str,
-    egress_neighbor: str,
-) -> tuple[str, ...] | None:
-    if not g.has_edge(src_ssu, source_union):
-        return None
-    edge = g.get_edge_data(source_union, egress_neighbor) or {}
-    if edge.get("link_kind") != "backend_interconnect":
-        return None
-
-    prefix = [src_ssu, source_union, egress_neighbor]
-    blocked = set(prefix[:-1])
-
-    reduced = g.copy()
-    reduced.remove_nodes_from(blocked)
-
-    try:
-        suffix = nx.shortest_path(reduced, egress_neighbor, dst_ssu)
-    except nx.NetworkXNoPath:
-        return None
-
-    return tuple(prefix[:-1] + suffix)
-
-
-def _move_to_union(
-    g: nx.Graph,
-    nodes: list[str],
-    current_node: str,
-    exchange_id: str,
-    target_union: str,
-) -> str:
-    if current_node == target_union:
-        return current_node
-
-    if _exchange_id(current_node) != exchange_id:
-        raise ValueError(
-            f"Current node {current_node} does not belong to exchange {exchange_id}"
-        )
-
-    if _is_ssu(current_node):
-        if not g.has_edge(current_node, target_union):
-            raise ValueError(
-                f"DOR expected internal edge missing between {current_node} and {target_union}"
-            )
-        nodes.append(target_union)
-        return target_union
-
-    transfer_ssu = f"{exchange_id}:ssu0"
-    if current_node != transfer_ssu:
-        if not g.has_edge(current_node, transfer_ssu):
-            raise ValueError(
-                f"DOR expected internal edge missing between {current_node} and {transfer_ssu}"
-            )
-        nodes.append(transfer_ssu)
-    if not g.has_edge(transfer_ssu, target_union):
-        raise ValueError(
-            f"DOR expected internal edge missing between {transfer_ssu} and {target_union}"
-        )
-    nodes.append(target_union)
-    return target_union
+def _union_label(union_id: str) -> str:
+    return str(union_id).split(":", 1)[1]
 
 
 def _exchange_id(node_id: str) -> str:
     return str(node_id).split(":", 1)[0]
-
-
-def _is_ssu(node_id: str) -> bool:
-    return ":ssu" in str(node_id)
 
 
 def _exchange_count(g: nx.Graph) -> int:
@@ -360,4 +424,3 @@ def _exchange_to_coord_3d(exchange_id: str, size: int) -> tuple[int, int, int]:
 def _coord_to_exchange_3d(coord: Iterable[int], size: int) -> str:
     x, y, z = tuple(coord)
     return f"en{(x * size * size) + (y * size) + z}"
-

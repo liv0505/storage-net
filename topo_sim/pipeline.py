@@ -11,9 +11,19 @@ import networkx as nx
 from .config import AnalysisConfig
 from .metrics import compute_structural_metrics, evaluate_workload
 from .report import build_pdf_report
+from .routing import compute_paths, normalize_routing_mode
 from .topologies import available_topologies, build_topology
 from .traffic import build_a2a_demands, build_sparse_random_demands
 from .visualization import render_html_dashboard
+
+
+_COMPARISON_COLUMNS: list[dict[str, str]] = [
+    {"key": "per_ssu_throughput_gbps", "label": "Per SSU Throughput", "unit": "Gbps"},
+    {"key": "completion_time_s", "label": "Completion Time", "unit": "s"},
+    {"key": "completion_time_p95_s", "label": "P95 Completion", "unit": "s"},
+    {"key": "max_link_utilization", "label": "Max Link Utilization", "unit": "ratio"},
+    {"key": "link_utilization_cv", "label": "Link Utilization CV", "unit": "ratio"},
+]
 
 
 def _prefix_workload_metrics(prefix: str, workload: dict[str, float]) -> dict[str, float]:
@@ -38,24 +48,40 @@ def _workload_group(prefix: str, machine_metrics: dict[str, float]) -> dict[str,
     }
 
 
-def _build_machine_metrics(g: nx.Graph, cfg: AnalysisConfig) -> dict[str, float]:
+def _analysis_mode_for_topology(name: str, cfg: AnalysisConfig) -> str:
+    if name == "Clos":
+        return "ECMP"
+    return normalize_routing_mode(cfg.routing_mode)
+
+
+def _workload_demands(g: nx.Graph, cfg: AnalysisConfig) -> dict[str, list[Any]]:
+    return {
+        "A2A": build_a2a_demands(g, cfg),
+        "Sparse 1-to-N": build_sparse_random_demands(g, cfg),
+    }
+
+
+def _evaluate_named_workloads(
+    g: nx.Graph,
+    cfg: AnalysisConfig,
+    routing_mode: str,
+    demands: dict[str, list[Any]] | None = None,
+) -> dict[str, dict[str, float]]:
+    workload_demands = demands or _workload_demands(g, cfg)
+    return {
+        workload_name: evaluate_workload(g, demand_list, routing_mode=routing_mode, cfg=cfg)
+        for workload_name, demand_list in workload_demands.items()
+    }
+
+
+def _build_machine_metrics(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict[str, float]:
     structural_metrics = compute_structural_metrics(g)
-    a2a_metrics = evaluate_workload(
-        g,
-        build_a2a_demands(g, cfg),
-        routing_mode=cfg.routing_mode,
-        cfg=cfg,
-    )
-    sparse_metrics = evaluate_workload(
-        g,
-        build_sparse_random_demands(g, cfg),
-        routing_mode=cfg.routing_mode,
-        cfg=cfg,
-    )
+    routing_mode = _analysis_mode_for_topology(name, cfg)
+    workload_metrics = _evaluate_named_workloads(g, cfg, routing_mode)
     return {
         **structural_metrics,
-        **_prefix_workload_metrics("a2a", a2a_metrics),
-        **_prefix_workload_metrics("sparse", sparse_metrics),
+        **_prefix_workload_metrics("a2a", workload_metrics["A2A"]),
+        **_prefix_workload_metrics("sparse", workload_metrics["Sparse 1-to-N"]),
     }
 
 
@@ -96,14 +122,24 @@ def _topology_scale(name: str) -> str:
 
 def _topology_pattern(name: str, cfg: AnalysisConfig) -> str:
     if name == "2D-FullMesh":
-        return "Row-wise full mesh on Union0 and column-wise full mesh on Union1"
+        return (
+            "Each Union uses 6 backend ports: 3 row links on the X axis and 3 column links on the Y axis, "
+            "so both Union chips carry the same 4x4 full-mesh structure."
+        )
     if name == "2D-Torus":
-        return "Wrap-around X on Union0 and wrap-around Y on Union1"
+        return (
+            "Each Union uses 4 backend ports: X+/X- and Y+/Y- wrap-around torus links, "
+            "so both Union chips carry the same 4x4 torus plane."
+        )
     if name == "3D-Torus":
-        return "Wrap-around X and Z on Union0, wrap-around Y on Union1"
+        return (
+            "Each Union uses 6 backend ports: X+/X-, Y+/Y-, and Z+/Z- wrap-around torus links, "
+            "so both Union chips carry the same 4x4x4 torus volume."
+        )
     return (
-        "Two-stage Clos with an upper Union stage; each exchange node uses "
-        f"{cfg.clos_uplinks_per_exchange_node} x 400 Gbps uplinks"
+        "Each exchange node keeps two independent Union planes; each Union uplinks via "
+        f"{cfg.clos_uplinks_per_exchange_node} x 400 Gbps into its own Clos spine pool, "
+        f"for {cfg.clos_uplinks_per_exchange_node * 2} x 400 Gbps total per exchange node."
     )
 
 
@@ -124,6 +160,13 @@ def _topology_configuration(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict
         1 for _, _, data in g.edges(data=True) if data.get("link_kind") == "internal_ssu_uplink"
     )
 
+    backend_ports_per_union = {
+        "2D-FullMesh": 6,
+        "2D-Torus": 4,
+        "3D-Torus": 6,
+        "Clos": cfg.clos_uplinks_per_exchange_node,
+    }[name]
+
     topology_cfg = {
         "scale": _topology_scale(name),
         "exchange_node_count": exchange_node_count,
@@ -131,40 +174,124 @@ def _topology_configuration(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict
         "union_count": union_count,
         "internal_link_count": internal_link_count,
         "backend_link_count": backend_link_count,
+        "backend_ports_per_union": backend_ports_per_union,
         "backend_pattern": _topology_pattern(name, cfg),
     }
     if name == "Clos":
-        topology_cfg["clos_uplinks_per_exchange_node"] = cfg.clos_uplinks_per_exchange_node
+        topology_cfg["clos_uplinks_per_union_plane"] = cfg.clos_uplinks_per_exchange_node
+        topology_cfg["clos_total_uplinks_per_exchange_node"] = cfg.clos_uplinks_per_exchange_node * 2
     return topology_cfg
 
 
 def _routing_configuration(name: str, cfg: AnalysisConfig) -> dict[str, Any]:
-    mode = cfg.routing_mode
+    mode = _analysis_mode_for_topology(name, cfg)
     direct_connect = name in {"2D-FullMesh", "2D-Torus", "3D-Torus"}
     notes = [
         "same-exchange SSU traffic stays inside the exchange node via Union switching",
+        "source SSU traffic evenly splits across both local 200 Gbps uplinks into the two Union planes",
         "inter-exchange SSU traffic is modeled as source SSU -> source Union -> backend topology -> destination Union -> destination SSU",
+        "destination-side traffic evenly splits from the two destination Unions down to the target SSU",
     ]
     if direct_connect:
         notes.append(
-            "PORT_BALANCED evenly splits traffic across source backend ports and can use non-shortest paths only when a selected port has no shortest path"
+            "both Union chips expose the same direct-connect backend plane, so routing decisions are evaluated independently on each Union plane"
         )
-    if name == "Clos":
-        notes.append("ECMP splits traffic across equal-cost shortest paths on the Clos fabric")
     if mode == "DOR":
-        notes.append("DOR follows a deterministic dimension order on torus topologies")
-    elif mode == "PORT_BALANCED":
+        if name == "2D-Torus":
+            notes.append("DOR keeps each Union plane on deterministic dimension-order shortest routing in X -> Y order")
+        elif name == "3D-Torus":
+            notes.append("DOR keeps each Union plane on deterministic dimension-order shortest routing in X -> Y -> Z order")
+        elif name == "2D-FullMesh":
+            notes.append("DOR keeps each Union plane on deterministic dimension-order shortest routing in X -> Y order across the full-mesh axes")
+        else:
+            notes.append("DOR keeps each Union plane on deterministic dimension-order shortest routing")
+    elif mode == "SHORTEST_PATH":
+        notes.append("SHORTEST_PATH splits each Union plane across all shortest Union-to-Union paths without a fixed dimension order")
+    elif mode == "FULL_PATH":
+        notes.append("each Union plane can use every available backend egress port")
+        notes.append("FULL_PATH uniformly splits across all available backend egress ports on each Union plane, with one path per egress port")
+        notes.append("for each selected egress port, routing prefers a shortest path to the destination Union")
+        notes.append("if a selected egress has no shortest path, routing falls back to the least-hop non-shortest path to the destination node")
         notes.append(
-            f"PORT_BALANCED allows up to {cfg.port_balanced_max_detour_hops} additional hop(s) beyond shortest-path distance"
+            f"non-shortest fallback is limited to {cfg.port_balanced_max_detour_hops} additional hop(s) beyond shortest-path distance when fallback is required"
         )
     elif mode == "ECMP":
-        notes.append("ECMP keeps traffic on equal-cost shortest paths")
-    else:
-        notes.append("MIN_HOPS uses a single shortest path as the baseline route")
+        notes.append("ECMP splits Clos traffic across equal-cost shortest paths through the upper Union stage")
+        notes.append(
+            f"each exchange contributes {cfg.clos_uplinks_per_exchange_node} x 400 Gbps from union0 and {cfg.clos_uplinks_per_exchange_node} x 400 Gbps from union1 into separate Clos spine pools"
+        )
 
     return {
         "mode": mode,
+        "requested_mode": cfg.routing_mode,
         "notes": notes,
+    }
+
+
+def _exchange_ids(g: nx.Graph) -> list[str]:
+    return sorted(
+        {
+            str(data.get("exchange_node_id"))
+            for _, data in g.nodes(data=True)
+            if data.get("exchange_node_id") is not None
+        },
+        key=lambda value: int(value.removeprefix("en")),
+    )
+
+
+def _routing_diversity_snapshot(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict[str, Any] | None:
+    if name not in {"2D-FullMesh", "2D-Torus", "3D-Torus"}:
+        return None
+
+    exchange_ids = _exchange_ids(g)
+    if len(exchange_ids) < 2:
+        return None
+
+    pair_count = 0
+    per_mode_counts: dict[str, list[int]] = {
+        "DOR": [],
+        "SHORTEST_PATH": [],
+        "FULL_PATH": [],
+    }
+
+    for index, src_exchange in enumerate(exchange_ids):
+        src_ssu = f"{src_exchange}:ssu0"
+        for dst_exchange in exchange_ids[index + 1 :]:
+            dst_ssu = f"{dst_exchange}:ssu0"
+            pair_count += 1
+            for mode in per_mode_counts:
+                per_mode_counts[mode].append(len(compute_paths(g, src_ssu, dst_ssu, mode, cfg)))
+
+    if pair_count == 0:
+        return None
+
+    modes: list[dict[str, Any]] = []
+    for mode, counts in per_mode_counts.items():
+        average = float(sum(counts) / len(counts)) if counts else 0.0
+        peak = int(max(counts)) if counts else 0
+        modes.append(
+            {
+                "mode": mode,
+                "avg_path_count": average,
+                "max_path_count": peak,
+            }
+        )
+
+    mode_map = {item["mode"]: item for item in modes}
+    dor_avg = max(mode_map["DOR"]["avg_path_count"], 1e-9)
+    shortest_avg = mode_map["SHORTEST_PATH"]["avg_path_count"]
+    full_avg = mode_map["FULL_PATH"]["avg_path_count"]
+
+    summary = (
+        f"SHORTEST_PATH vs DOR: {shortest_avg / dor_avg:.2f}x average path diversity "
+        f"({shortest_avg:.2f} vs {mode_map['DOR']['avg_path_count']:.2f} end-to-end paths per inter-exchange SSU pair); "
+        f"FULL_PATH reaches {full_avg:.2f} on average with peak {mode_map['FULL_PATH']['max_path_count']} paths."
+    )
+
+    return {
+        "pair_count": pair_count,
+        "modes": modes,
+        "summary": summary,
     }
 
 
@@ -174,6 +301,79 @@ def _workload_configuration(cfg: AnalysisConfig) -> dict[str, Any]:
         "a2a_scope": "all SSUs send to every other SSU",
         "sparse_active_ratio": cfg.sparse_active_ratio,
         "sparse_target_count": cfg.sparse_target_count,
+    }
+
+
+def _comparison_modes_for_topology(name: str) -> list[str]:
+    if name == "Clos":
+        return ["ECMP"]
+    return ["DOR", "SHORTEST_PATH", "FULL_PATH"]
+
+
+def _default_highlight_mode(name: str) -> str:
+    return "ECMP" if name == "Clos" else "DOR"
+
+
+def _comparison_metric_subset(metrics: dict[str, float]) -> dict[str, float]:
+    return {column["key"]: metrics[column["key"]] for column in _COMPARISON_COLUMNS}
+
+
+def _routing_comparison_payload(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict[str, Any] | None:
+    if name == "Clos":
+        return None
+
+    demands = _workload_demands(g, cfg)
+    per_mode_results = {
+        mode: _evaluate_named_workloads(g, cfg, mode, demands)
+        for mode in _comparison_modes_for_topology(name)
+    }
+
+    sections = []
+    for title in ("A2A", "Sparse 1-to-N"):
+        sections.append(
+            {
+                "title": f"{title} Routing Comparison",
+                "workload": title,
+                "rows": [
+                    {
+                        "mode": mode,
+                        **_comparison_metric_subset(per_mode_results[mode][title]),
+                    }
+                    for mode in _comparison_modes_for_topology(name)
+                ],
+            }
+        )
+
+    return {
+        "columns": list(_COMPARISON_COLUMNS),
+        "sections": sections,
+    }
+
+
+def _default_routing_highlight(
+    name: str,
+    cfg: AnalysisConfig,
+    comparison_payload: dict[str, Any] | None,
+    active_a2a_metrics: dict[str, float],
+    active_sparse_metrics: dict[str, float],
+) -> dict[str, Any]:
+    default_mode = _default_highlight_mode(name)
+    if comparison_payload is not None:
+        by_workload = {section["workload"]: section for section in comparison_payload["sections"]}
+        a2a_row = next(row for row in by_workload["A2A"]["rows"] if row["mode"] == default_mode)
+        sparse_row = next(row for row in by_workload["Sparse 1-to-N"]["rows"] if row["mode"] == default_mode)
+        return {
+            "mode": default_mode,
+            "label": f"{default_mode} Throughput",
+            "a2a_per_ssu_throughput_gbps": a2a_row["per_ssu_throughput_gbps"],
+            "sparse_per_ssu_throughput_gbps": sparse_row["per_ssu_throughput_gbps"],
+        }
+
+    return {
+        "mode": default_mode,
+        "label": f"{default_mode} Throughput",
+        "a2a_per_ssu_throughput_gbps": active_a2a_metrics["per_ssu_throughput_gbps"],
+        "sparse_per_ssu_throughput_gbps": active_sparse_metrics["per_ssu_throughput_gbps"],
     }
 
 
@@ -214,6 +414,7 @@ def _build_render_result(
     }
     a2a_metrics = _workload_group("a2a", machine_metrics)
     sparse_metrics = _workload_group("sparse", machine_metrics)
+    routing_comparison = _routing_comparison_payload(name, g, cfg)
 
     return {
         "name": name,
@@ -222,12 +423,21 @@ def _build_render_result(
         "hardware": _hardware_assumptions(),
         "topology": _topology_configuration(name, g, cfg),
         "routing": _routing_configuration(name, cfg),
+        "routing_diversity": _routing_diversity_snapshot(name, g, cfg),
         "workloads": _workload_configuration(cfg),
         "structural_metrics": structural_metrics,
         "communication_metrics": {
             "A2A": a2a_metrics,
             "Sparse 1-to-N": sparse_metrics,
         },
+        "default_routing_highlight": _default_routing_highlight(
+            name,
+            cfg,
+            routing_comparison,
+            a2a_metrics,
+            sparse_metrics,
+        ),
+        "routing_comparison": routing_comparison,
         "observations": _build_observations(structural_metrics, a2a_metrics, sparse_metrics),
     }
 
@@ -243,7 +453,7 @@ def run_full_analysis(cfg: AnalysisConfig, topologies: list[str] | None = None) 
 
     for offset, name in enumerate(selected):
         g = build_topology(name, cfg)
-        machine_metrics = _build_machine_metrics(g, cfg)
+        machine_metrics = _build_machine_metrics(name, g, cfg)
 
         summary_rows.append({"topology": name, **machine_metrics})
         render_results.append(
