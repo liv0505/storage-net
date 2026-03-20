@@ -411,6 +411,7 @@ def _build_render_result(
         "diameter": machine_metrics["diameter"],
         "average_hops": machine_metrics["average_hops"],
         "bisection_bandwidth_gbps": machine_metrics["bisection_bandwidth_gbps"],
+        "bisection_bandwidth_gbps_per_ssu": machine_metrics["bisection_bandwidth_gbps_per_ssu"],
     }
     a2a_metrics = _workload_group("a2a", machine_metrics)
     sparse_metrics = _workload_group("sparse", machine_metrics)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
+from itertools import combinations
 from typing import Iterable
 
 import networkx as nx
@@ -73,31 +74,120 @@ def _build_union_plane_graph(g: nx.Graph, union_label: str) -> nx.Graph:
     return plane_graph
 
 
-def _bisection_bandwidth_gbps(g: nx.Graph) -> float:
-    if g.number_of_nodes() < 2 or g.number_of_edges() == 0:
+def _exchange_ids(g: nx.Graph) -> list[str]:
+    return sorted(
+        {
+            str(data.get("exchange_node_id"))
+            for _, data in g.nodes(data=True)
+            if data.get("exchange_node_id") is not None
+        },
+        key=lambda value: int(value.removeprefix("en")),
+    )
+
+
+def _torus_side_length(exchange_count: int, dimensions: int) -> int:
+    if dimensions == 2:
+        size = int(round(exchange_count ** 0.5))
+    elif dimensions == 3:
+        size = int(round(exchange_count ** (1 / 3)))
+    else:
+        raise ValueError(f"Unsupported torus dimension count: {dimensions}")
+
+    if size <= 0 or size**dimensions != exchange_count:
+        raise ValueError(
+            f"Exchange count {exchange_count} does not form a {dimensions}D torus grid"
+        )
+    return size
+
+
+def _exchange_to_coord_3d(exchange_id: str, size: int) -> tuple[int, int, int]:
+    idx = int(exchange_id.removeprefix("en"))
+    x = idx // (size * size)
+    rem = idx % (size * size)
+    y = rem // size
+    z = rem % size
+    return x, y, z
+
+
+def _candidate_exchange_partitions(g: nx.Graph) -> list[frozenset[str]]:
+    exchange_ids = _exchange_ids(g)
+    exchange_count = len(exchange_ids)
+    if exchange_count == 0 or exchange_count % 2 != 0:
+        return []
+
+    topology_kind = _infer_direct_topology_kind(g)
+    half = exchange_count // 2
+
+    if topology_kind == "3D-TORUS" and exchange_count > 18:
+        size = _torus_side_length(exchange_count, dimensions=3)
+        midpoint = size // 2
+        partitions: list[frozenset[str]] = []
+        for axis in range(3):
+            side_a = {
+                exchange_id
+                for exchange_id in exchange_ids
+                if _exchange_to_coord_3d(exchange_id, size)[axis] < midpoint
+            }
+            partitions.append(frozenset(side_a))
+        return partitions
+
+    fixed = exchange_ids[0]
+    return [
+        frozenset((fixed, *combo))
+        for combo in combinations(exchange_ids[1:], half - 1)
+    ]
+
+
+def _backend_only_balanced_bisection_bandwidth_gbps(g: nx.Graph) -> float:
+    candidate_partitions = _candidate_exchange_partitions(g)
+    if not candidate_partitions:
         return 0.0
 
-    weighted = nx.Graph()
-    weighted.add_nodes_from(g.nodes())
-    for u, v, data in g.edges(data=True):
-        weighted.add_edge(u, v, weight=float(data.get("bandwidth_gbps", 0.0)))
+    best_cut = float("inf")
+    for side_a in candidate_partitions:
+        cut_value = 0.0
+        neutral_loads: dict[str, dict[str, float]] = defaultdict(lambda: {"A": 0.0, "B": 0.0})
 
-    if weighted.number_of_edges() == 0:
-        return 0.0
-    if not nx.is_connected(weighted):
-        return 0.0
+        for u, v, data in g.edges(data=True):
+            if data.get("link_kind") != "backend_interconnect":
+                continue
 
-    cut_value, _ = nx.stoer_wagner(weighted, weight="weight")
-    return float(cut_value)
+            bandwidth = float(data.get("bandwidth_gbps", 0.0))
+            exchange_u = g.nodes[u].get("exchange_node_id")
+            exchange_v = g.nodes[v].get("exchange_node_id")
+
+            if exchange_u is not None and exchange_v is not None:
+                if (exchange_u in side_a) != (exchange_v in side_a):
+                    cut_value += bandwidth
+                continue
+
+            if exchange_u is None and exchange_v is None:
+                continue
+
+            neutral_node = str(u if exchange_u is None else v)
+            fixed_exchange = str(exchange_v if exchange_u is None else exchange_u)
+            fixed_side = "A" if fixed_exchange in side_a else "B"
+            neutral_loads[neutral_node][fixed_side] += bandwidth
+
+        cut_value += sum(min(loads["A"], loads["B"]) for loads in neutral_loads.values())
+        best_cut = min(best_cut, cut_value)
+
+    return 0.0 if best_cut == float("inf") else float(best_cut)
 
 
 def compute_structural_metrics(g: nx.Graph) -> dict[str, float]:
     ssus = _ssu_nodes(g)
-    if len(ssus) < 2:
+    total_ssu_count = len(ssus)
+    bisection_bandwidth_gbps = _backend_only_balanced_bisection_bandwidth_gbps(g)
+    bisection_bandwidth_gbps_per_ssu = (
+        bisection_bandwidth_gbps / float(total_ssu_count) if total_ssu_count > 0 else 0.0
+    )
+    if total_ssu_count < 2:
         return {
             "diameter": 0.0,
             "average_hops": 0.0,
-            "bisection_bandwidth_gbps": _bisection_bandwidth_gbps(g),
+            "bisection_bandwidth_gbps": bisection_bandwidth_gbps,
+            "bisection_bandwidth_gbps_per_ssu": bisection_bandwidth_gbps_per_ssu,
         }
 
     pair_hops: list[float] = []
@@ -126,7 +216,8 @@ def compute_structural_metrics(g: nx.Graph) -> dict[str, float]:
     return {
         "diameter": diameter,
         "average_hops": average_hops,
-        "bisection_bandwidth_gbps": _bisection_bandwidth_gbps(g),
+        "bisection_bandwidth_gbps": bisection_bandwidth_gbps,
+        "bisection_bandwidth_gbps_per_ssu": bisection_bandwidth_gbps_per_ssu,
     }
 
 

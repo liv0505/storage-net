@@ -230,6 +230,7 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
         "Diameter",
         "Average Hops",
         "Bisection BW (Gbps)",
+        "Bisection BW / SSU",
         "Default Route Throughput (Gbps)",
         "Sparse P95 Completion (ms)",
     ]]
@@ -240,11 +241,12 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
                 _fmt_value(item["structural_metrics"]["diameter"]),
                 _fmt_value(item["structural_metrics"]["average_hops"]),
                 _fmt_value(item["structural_metrics"]["bisection_bandwidth_gbps"]),
+                _fmt_value(item["structural_metrics"]["bisection_bandwidth_gbps_per_ssu"]),
                 _fmt_value(item["default_routing_highlight"]["a2a_per_ssu_throughput_gbps"]),
                 _fmt_value(item["communication_metrics"]["Sparse 1-to-N"]["completion_time_p95_s"] * 1e3),
             ]
         )
-    story.append(_styled_table(summary_rows, [28 * mm, 18 * mm, 24 * mm, 28 * mm, 44 * mm, 34 * mm]))
+    story.append(_styled_table(summary_rows, [24 * mm, 16 * mm, 20 * mm, 26 * mm, 24 * mm, 38 * mm, 30 * mm]))
     story.append(Spacer(1, 10))
 
     for item in results:

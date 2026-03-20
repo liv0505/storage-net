@@ -18,6 +18,26 @@ def test_structural_metrics_use_ssu_pairs():
     assert "bisection_bandwidth_gbps" in metrics
 
 
+def test_structural_metrics_use_backend_only_balanced_bisection_bandwidth():
+    g = build_topology("2D-Torus", AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(6400.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(50.0)
+
+
+def test_bisection_bandwidth_ignores_internal_ssu_uplinks_when_backend_is_removed():
+    g = build_topology("2D-Torus", AnalysisConfig())
+    for u, v, data in list(g.edges(data=True)):
+        if data.get("link_kind") == "backend_interconnect":
+            g.remove_edge(u, v)
+
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == 0.0
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == 0.0
+
+
 def test_a2a_metrics_return_throughput_completion_and_percentiles():
     cfg = AnalysisConfig()
     g = build_topology("Clos", cfg)

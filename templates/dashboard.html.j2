@@ -309,6 +309,7 @@
                 <div class="metric"><span class="k">Diameter</span><span class="v">{{ '%.0f'|format(r.structural_metrics.diameter) }}</span></div>
                 <div class="metric"><span class="k">Average Hops</span><span class="v">{{ '%.2f'|format(r.structural_metrics.average_hops) }}</span></div>
                 <div class="metric"><span class="k">Bisection Bandwidth</span><span class="v">{{ '%.1f'|format(r.structural_metrics.bisection_bandwidth_gbps) }} Gbps</span></div>
+                <div class="metric"><span class="k">Bisection BW / SSU</span><span class="v">{{ '%.2f'|format(r.structural_metrics.bisection_bandwidth_gbps_per_ssu) }} Gbps</span></div>
                 <div class="metric"><span class="k">Backend Links</span><span class="v">{{ r.topology.backend_link_count }}</span></div>
               </div>
               <div class="workload-panel">

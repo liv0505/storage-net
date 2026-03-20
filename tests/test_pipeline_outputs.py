@@ -16,6 +16,7 @@ EXPECTED_SUMMARY_HEADERS = [
     "diameter",
     "average_hops",
     "bisection_bandwidth_gbps",
+    "bisection_bandwidth_gbps_per_ssu",
     "a2a_completion_time_s",
     "a2a_completion_time_p50_s",
     "a2a_completion_time_p95_s",
@@ -72,6 +73,7 @@ def test_dashboard_and_report_use_new_labels(output_dir: Path):
 
     html = paths["html"].read_text(encoding="utf-8")
     assert "A2A Per SSU Throughput" in html
+    assert "Bisection BW / SSU" in html
     assert "Sparse 1-to-N" in html
     assert "Routing Mode" in html
     assert "same-exchange SSU traffic stays inside the exchange node via Union switching" in html
