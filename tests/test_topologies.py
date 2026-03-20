@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 
 from topo_sim.config import AnalysisConfig
 from topo_sim.topologies import available_topologies, build_topology
@@ -16,6 +16,17 @@ def test_2d_fullmesh_builds_exchange_nodes_with_expected_parts():
     assert len(union_nodes) == 16 * 2
 
 
+def test_2d_fullmesh_has_expected_backend_structure():
+    g = build_topology("2D-FullMesh", AnalysisConfig())
+    backend = [
+        data
+        for _, _, data in g.edges(data=True)
+        if data["link_kind"] == "backend_interconnect"
+    ]
+    assert len(backend) == 96
+    assert {data["topology_role"] for data in backend} == {"2d_fullmesh_x", "2d_fullmesh_y"}
+
+
 def test_2d_torus_has_expected_backend_structure():
     g = build_topology("2D-Torus", AnalysisConfig())
     backend = [
@@ -23,7 +34,7 @@ def test_2d_torus_has_expected_backend_structure():
         for _, _, data in g.edges(data=True)
         if data["link_kind"] == "backend_interconnect"
     ]
-    assert len(backend) == 32
+    assert len(backend) == 64
     assert {data["topology_role"] for data in backend} == {"2d_torus_x", "2d_torus_y"}
 
 
@@ -35,10 +46,57 @@ def test_3d_torus_has_uniform_backend_bandwidth_per_direction():
         if data["link_kind"] == "backend_interconnect"
     ]
     assert set(backend) == {400.0}
+    assert len(backend) == 384
 
 
-def test_clos_uses_18_exchange_nodes_with_four_uplinks_each():
-    g = build_topology("Clos", AnalysisConfig())
+def test_2d_fullmesh_gives_each_union_six_backend_ports():
+    g = build_topology("2D-FullMesh", AnalysisConfig())
+    union_backend_degree = {
+        node_id: sum(
+            1
+            for _, _, data in g.edges(node_id, data=True)
+            if data["link_kind"] == "backend_interconnect"
+        )
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {6}
+
+
+def test_2d_torus_gives_each_union_four_backend_ports():
+    g = build_topology("2D-Torus", AnalysisConfig())
+    union_backend_degree = {
+        node_id: sum(
+            1
+            for _, _, data in g.edges(node_id, data=True)
+            if data["link_kind"] == "backend_interconnect"
+        )
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {4}
+
+
+def test_3d_torus_gives_each_union_six_backend_ports():
+    g = build_topology("3D-Torus", AnalysisConfig())
+    union_backend_degree = {
+        node_id: sum(
+            1
+            for _, _, data in g.edges(node_id, data=True)
+            if data["link_kind"] == "backend_interconnect"
+        )
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {6}
+
+
+def test_clos_uses_18_exchange_nodes_with_plane_local_uplinks():
+    cfg = AnalysisConfig()
+    g = build_topology("Clos", cfg)
     backend = [
         (u, v, data)
         for u, v, data in g.edges(data=True)
@@ -51,14 +109,26 @@ def test_clos_uses_18_exchange_nodes_with_four_uplinks_each():
             if exchange_node is not None:
                 uplinks_by_exchange[exchange_node] = uplinks_by_exchange.get(exchange_node, 0) + 1
     assert len(uplinks_by_exchange) == 18
-    assert all(count == 4 for count in uplinks_by_exchange.values())
+    assert all(count == cfg.clos_uplinks_per_exchange_node * 2 for count in uplinks_by_exchange.values())
+
+    union_backend_degree = {
+        node_id: sum(
+            1
+            for _, _, data in g.edges(node_id, data=True)
+            if data.get("link_kind") == "backend_interconnect"
+        )
+        for node_id, node_data in g.nodes(data=True)
+        if node_data.get("node_role") == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {cfg.clos_uplinks_per_exchange_node}
 
 
 def test_clos_spines_have_expected_count_and_exact_fanout_in_default_case():
     cfg = AnalysisConfig()
     g = build_topology("Clos", cfg)
     spine_nodes = [n for n, d in g.nodes(data=True) if d.get("node_role") == "clos_spine"]
-    assert len(spine_nodes) == cfg.clos_uplinks_per_exchange_node
+    assert len(spine_nodes) == cfg.clos_uplinks_per_exchange_node * 2
 
     downlinks = [
         sum(

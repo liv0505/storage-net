@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Callable, Iterator
 
@@ -11,8 +11,8 @@ TopologyBuilder = Callable[[AnalysisConfig], nx.Graph]
 
 _BACKEND_BW_GBPS = 400.0
 _INTERNAL_BW_GBPS = 200.0
-_MIN_CLOS_UPLINKS_PER_EXCHANGE = 1
-_MAX_CLOS_UPLINKS_PER_EXCHANGE = 6
+_MIN_CLOS_UPLINKS_PER_PLANE = 1
+_MAX_CLOS_UPLINKS_PER_PLANE = 6
 _CLOS_EXCHANGE_NODE_COUNT = 18
 
 
@@ -61,13 +61,13 @@ def _validate_backend_uniformity(g: nx.Graph, topology_name: str) -> None:
 
 def _validate_clos_uplink_budget(cfg: AnalysisConfig) -> None:
     if not (
-        _MIN_CLOS_UPLINKS_PER_EXCHANGE
+        _MIN_CLOS_UPLINKS_PER_PLANE
         <= cfg.clos_uplinks_per_exchange_node
-        <= _MAX_CLOS_UPLINKS_PER_EXCHANGE
+        <= _MAX_CLOS_UPLINKS_PER_PLANE
     ):
         raise ValueError(
             "clos_uplinks_per_exchange_node must be in "
-            f"[{_MIN_CLOS_UPLINKS_PER_EXCHANGE}, {_MAX_CLOS_UPLINKS_PER_EXCHANGE}]"
+            f"[{_MIN_CLOS_UPLINKS_PER_PLANE}, {_MAX_CLOS_UPLINKS_PER_PLANE}] per union plane"
         )
 
 
@@ -152,25 +152,26 @@ def build_2d_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
             exchange_id = f"en{r * cols + c}"
             exchanges[(r, c)] = _add_exchange_node(g, exchange_id, cfg)
 
-    for r in range(rows):
-        for c1 in range(cols):
-            for c2 in range(c1 + 1, cols):
-                _add_backend_link(
-                    g,
-                    exchanges[(r, c1)]["unions"][0],
-                    exchanges[(r, c2)]["unions"][0],
-                    topology_role="2d_fullmesh_row",
-                )
+    for union_index in range(2):
+        for r in range(rows):
+            for c1 in range(cols):
+                for c2 in range(c1 + 1, cols):
+                    _add_backend_link(
+                        g,
+                        exchanges[(r, c1)]["unions"][union_index],
+                        exchanges[(r, c2)]["unions"][union_index],
+                        topology_role="2d_fullmesh_x",
+                    )
 
-    for c in range(cols):
-        for r1 in range(rows):
-            for r2 in range(r1 + 1, rows):
-                _add_backend_link(
-                    g,
-                    exchanges[(r1, c)]["unions"][1],
-                    exchanges[(r2, c)]["unions"][1],
-                    topology_role="2d_fullmesh_col",
-                )
+        for c in range(cols):
+            for r1 in range(rows):
+                for r2 in range(r1 + 1, rows):
+                    _add_backend_link(
+                        g,
+                        exchanges[(r1, c)]["unions"][union_index],
+                        exchanges[(r2, c)]["unions"][union_index],
+                        topology_role="2d_fullmesh_y",
+                    )
 
     return _annotate_graph(g, cfg)
 
@@ -186,20 +187,21 @@ def build_2d_torus(cfg: AnalysisConfig) -> nx.Graph:
             exchange_id = f"en{r * cols + c}"
             exchanges[(r, c)] = _add_exchange_node(g, exchange_id, cfg)
 
-    for r in range(rows):
-        for c in range(cols):
-            _add_backend_link(
-                g,
-                exchanges[(r, c)]["unions"][0],
-                exchanges[(r, (c + 1) % cols)]["unions"][0],
-                topology_role="2d_torus_x",
-            )
-            _add_backend_link(
-                g,
-                exchanges[(r, c)]["unions"][1],
-                exchanges[((r + 1) % rows, c)]["unions"][1],
-                topology_role="2d_torus_y",
-            )
+    for union_index in range(2):
+        for r in range(rows):
+            for c in range(cols):
+                _add_backend_link(
+                    g,
+                    exchanges[(r, c)]["unions"][union_index],
+                    exchanges[(r, (c + 1) % cols)]["unions"][union_index],
+                    topology_role="2d_torus_x",
+                )
+                _add_backend_link(
+                    g,
+                    exchanges[(r, c)]["unions"][union_index],
+                    exchanges[((r + 1) % rows, c)]["unions"][union_index],
+                    topology_role="2d_torus_y",
+                )
 
     return _annotate_graph(g, cfg)
 
@@ -215,29 +217,28 @@ def build_3d_torus(cfg: AnalysisConfig) -> nx.Graph:
                 exchange_id = f"en{(x * size * size) + (y * size) + z}"
                 exchanges[(x, y, z)] = _add_exchange_node(g, exchange_id, cfg)
 
-    for x in range(size):
-        for y in range(size):
-            for z in range(size):
-                # Current lane assignment intentionally uses union0 for X and Z,
-                # while union1 carries Y links.
-                _add_backend_link(
-                    g,
-                    exchanges[(x, y, z)]["unions"][0],
-                    exchanges[((x + 1) % size, y, z)]["unions"][0],
-                    topology_role="3d_torus_x",
-                )
-                _add_backend_link(
-                    g,
-                    exchanges[(x, y, z)]["unions"][1],
-                    exchanges[(x, (y + 1) % size, z)]["unions"][1],
-                    topology_role="3d_torus_y",
-                )
-                _add_backend_link(
-                    g,
-                    exchanges[(x, y, z)]["unions"][0],
-                    exchanges[(x, y, (z + 1) % size)]["unions"][0],
-                    topology_role="3d_torus_z",
-                )
+    for union_index in range(2):
+        for x in range(size):
+            for y in range(size):
+                for z in range(size):
+                    _add_backend_link(
+                        g,
+                        exchanges[(x, y, z)]["unions"][union_index],
+                        exchanges[((x + 1) % size, y, z)]["unions"][union_index],
+                        topology_role="3d_torus_x",
+                    )
+                    _add_backend_link(
+                        g,
+                        exchanges[(x, y, z)]["unions"][union_index],
+                        exchanges[(x, (y + 1) % size, z)]["unions"][union_index],
+                        topology_role="3d_torus_y",
+                    )
+                    _add_backend_link(
+                        g,
+                        exchanges[(x, y, z)]["unions"][union_index],
+                        exchanges[(x, y, (z + 1) % size)]["unions"][union_index],
+                        topology_role="3d_torus_z",
+                    )
 
     return _annotate_graph(g, cfg)
 
@@ -248,23 +249,30 @@ def build_clos(cfg: AnalysisConfig) -> nx.Graph:
     g = nx.Graph()
     exchange_nodes = [_add_exchange_node(g, f"en{idx}", cfg) for idx in range(_CLOS_EXCHANGE_NODE_COUNT)]
 
-    spine_ids = [
-        f"clos_spine_union{index}"
-        for index in range(cfg.clos_uplinks_per_exchange_node)
-    ]
-    for spine_id in spine_ids:
-        g.add_node(spine_id, node_type="switch", node_role="clos_spine")
+    plane_spine_ids: dict[int, list[str]] = {}
+    for plane_index in range(2):
+        spine_ids = [
+            f"clos_spine_plane{plane_index}_uplink{index}"
+            for index in range(cfg.clos_uplinks_per_exchange_node)
+        ]
+        plane_spine_ids[plane_index] = spine_ids
+        for spine_id in spine_ids:
+            g.add_node(
+                spine_id,
+                node_type="switch",
+                node_role="clos_spine",
+                union_plane=plane_index,
+            )
 
     for exchange in exchange_nodes:
-        for uplink_index, spine_id in enumerate(spine_ids):
-            union_id = exchange["unions"][uplink_index % 2]
-            g.add_edge(
-                union_id,
-                spine_id,
-                bandwidth_gbps=_BACKEND_BW_GBPS,
-                link_kind="backend_interconnect",
-                topology_role="clos_uplink",
-            )
+        for plane_index, union_id in enumerate(exchange["unions"]):
+            for spine_id in plane_spine_ids[plane_index]:
+                _add_backend_link(
+                    g,
+                    union_id,
+                    spine_id,
+                    topology_role="clos_uplink",
+                )
 
     _validate_clos_spine_fanout(g)
     return _annotate_graph(g, cfg)
@@ -299,6 +307,3 @@ def build_topology(name: str, cfg: AnalysisConfig) -> nx.Graph:
 
 def available_topologies() -> list[str]:
     return list(BUILDERS.keys())
-
-
-
