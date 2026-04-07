@@ -15,6 +15,8 @@ def test_analysis_config_defaults_match_ssu_design():
     assert cfg.sparse_target_count == 2
     assert cfg.port_balanced_max_detour_hops == 1
     assert cfg.clos_uplinks_per_exchange_node == 4
+    assert cfg.df_unions_per_server == 4
+    assert cfg.df_external_servers_per_union == 3
 
 
 def test_parse_args_accepts_new_topology_names(monkeypatch):
@@ -34,6 +36,12 @@ def test_parse_args_accepts_new_topology_names(monkeypatch):
     assert args.topologies == "2D-FullMesh,Clos"
     assert args.routing_mode == "PORT_BALANCED"
     assert args.sparse_active_ratio == 0.5
+
+
+def test_parse_args_accepts_df_topology(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "DF"])
+    args = parse_args()
+    assert args.topologies == "DF"
 
 
 @pytest.mark.parametrize("routing_mode", ["DOR", "ECMP", "SHORTEST_PATH", "FULL_PATH", "MIN_HOPS", "PORT_BALANCED"])
@@ -129,6 +137,8 @@ def test_main_passes_cli_values_into_config_and_run_full_analysis(monkeypatch):
             sparse_target_count=3,
             port_balanced_max_detour_hops=2,
             clos_uplinks_per_exchange_node=4,
+            df_unions_per_server=4,
+            df_external_servers_per_union=3,
             message_size_mb=8.0,
             bandwidth_gbps=200.0,
             traffic_samples=123,
@@ -157,5 +167,6 @@ def test_main_passes_cli_values_into_config_and_run_full_analysis(monkeypatch):
     assert cfg.sparse_target_count == 3
     assert cfg.port_balanced_max_detour_hops == 2
     assert cfg.clos_uplinks_per_exchange_node == 4
+    assert cfg.df_unions_per_server == 4
+    assert cfg.df_external_servers_per_union == 3
     assert cfg.routing_mode == "FULL_PATH"
-

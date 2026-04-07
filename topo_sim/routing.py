@@ -58,7 +58,12 @@ def compute_paths(
         return [RoutedPath(nodes=(src_ssu,), weight=1.0)]
 
     if _exchange_id(src_ssu) == _exchange_id(dst_ssu):
+        if _is_df_topology(g):
+            return _compute_df_same_exchange_paths(g, src_ssu, dst_ssu)
         return _compute_same_exchange_internal_paths(g, src_ssu, dst_ssu, mode)
+
+    if _is_df_topology(g):
+        return _compute_df_paths(g, src_ssu, dst_ssu)
 
     if not nx.has_path(g, src_ssu, dst_ssu):
         return []
@@ -240,6 +245,94 @@ def _weight_wrapped_plane_paths(
     return routed_paths
 
 
+def _compute_df_same_exchange_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPath]:
+    exchange_id = _exchange_id(src_ssu)
+    internal_graph = _build_exchange_internal_graph(g, exchange_id)
+    return _compute_ecmp_paths(internal_graph, src_ssu, dst_ssu)
+
+
+def _compute_df_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPath]:
+    src_server = _server_id(g, src_ssu)
+    dst_server = _server_id(g, dst_ssu)
+    if src_server is None or dst_server is None:
+        return _compute_ecmp_paths(g, src_ssu, dst_ssu)
+
+    if src_server == dst_server:
+        return _compute_df_same_server_paths(g, src_ssu, dst_ssu)
+
+    gateway_map = g.graph.get("df_inter_server_gateways", {})
+    gateway_pair = gateway_map.get((src_server, dst_server))
+    if gateway_pair is None:
+        return []
+
+    src_gateway, dst_gateway = gateway_pair
+    if not g.has_edge(src_gateway, dst_gateway):
+        return []
+    source_prefixes = _df_paths_from_ssu_to_union(g, src_ssu, src_gateway)
+    destination_suffixes = _df_paths_from_union_to_ssu(g, dst_gateway, dst_ssu)
+    if not source_prefixes or not destination_suffixes:
+        return []
+
+    total_paths = len(source_prefixes) * len(destination_suffixes)
+    weight = 1.0 / float(total_paths)
+    return [
+        RoutedPath(nodes=tuple(prefix + suffix), weight=weight)
+        for prefix in source_prefixes
+        for suffix in destination_suffixes
+    ]
+
+
+def _compute_df_same_server_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPath]:
+    source_unions = _source_union_ids(g, src_ssu)
+    destination_unions = _source_union_ids(g, dst_ssu)
+    if not source_unions or not destination_unions:
+        return []
+
+    routed_nodes = [
+        (src_ssu, source_union, destination_union, dst_ssu)
+        for source_union in source_unions
+        for destination_union in destination_unions
+        if g.has_edge(source_union, destination_union)
+    ]
+    if not routed_nodes:
+        return []
+
+    weight = 1.0 / float(len(routed_nodes))
+    return [RoutedPath(nodes=nodes, weight=weight) for nodes in routed_nodes]
+
+
+def _df_paths_from_ssu_to_union(
+    g: nx.Graph,
+    src_ssu: str,
+    target_union: str,
+) -> list[tuple[str, ...]]:
+    source_unions = _source_union_ids(g, src_ssu)
+    if target_union in source_unions:
+        return [(src_ssu, target_union)]
+
+    return [
+        (src_ssu, source_union, target_union)
+        for source_union in source_unions
+        if g.has_edge(source_union, target_union)
+    ]
+
+
+def _df_paths_from_union_to_ssu(
+    g: nx.Graph,
+    src_union: str,
+    dst_ssu: str,
+) -> list[tuple[str, ...]]:
+    destination_unions = _source_union_ids(g, dst_ssu)
+    if src_union in destination_unions:
+        return [(src_union, dst_ssu)]
+
+    return [
+        (src_union, destination_union, dst_ssu)
+        for destination_union in destination_unions
+        if g.has_edge(src_union, destination_union)
+    ]
+
+
 def _build_union_plane_graph(g: nx.Graph, union_label: str) -> nx.Graph:
     plane_nodes = {
         node_id
@@ -351,6 +444,10 @@ def _infer_direct_topology_kind(g: nx.Graph) -> str | None:
     return None
 
 
+def _is_df_topology(g: nx.Graph) -> bool:
+    return str(g.graph.get("topology_name", "")).upper() == "DF"
+
+
 def _source_union_ids(g: nx.Graph, src_ssu: str) -> list[str]:
     unions = [
         str(neighbor)
@@ -366,6 +463,13 @@ def _union_label(union_id: str) -> str:
 
 def _exchange_id(node_id: str) -> str:
     return str(node_id).split(":", 1)[0]
+
+
+def _server_id(g: nx.Graph, node_id: str) -> int | None:
+    value = g.nodes[node_id].get("server_id")
+    if value is None:
+        return None
+    return int(value)
 
 
 def _exchange_count(g: nx.Graph) -> int:

@@ -181,6 +181,60 @@ def test_full_path_uses_all_available_egress_ports_across_both_planes():
     assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
 
 
+def test_df_same_exchange_shortest_path_stays_internal_and_splits_locally():
+    g = build_topology("DF", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en0:ssu0",
+        "en0:ssu1",
+        routing_mode="SHORTEST_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    assert len(paths) == 2
+    assert {round(path.weight, 8) for path in paths} == {0.5}
+    for path in paths:
+        _assert_path_stays_internal(g, path.nodes)
+
+
+def test_df_same_server_different_exchange_uses_server_local_fullmesh_only():
+    g = build_topology("DF", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en0:ssu0",
+        "en1:ssu0",
+        routing_mode="SHORTEST_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    assert len(paths) == 4
+    assert {path.hops for path in paths} == {3}
+    assert {round(path.weight, 8) for path in paths} == {0.25}
+    assert {
+        tuple(_backend_roles_for_path(g, path.nodes))
+        for path in paths
+    } == {("df_server_fullmesh",)}
+
+
+def test_df_cross_server_routing_uses_one_unique_inter_server_link_with_local_split():
+    g = build_topology("DF", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en1:ssu0",
+        "en2:ssu0",
+        routing_mode="DOR",
+        cfg=AnalysisConfig(),
+    )
+
+    assert len(paths) == 4
+    assert {round(path.weight, 8) for path in paths} == {0.25}
+    assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
+    assert {
+        tuple(_backend_roles_for_path(g, path.nodes))
+        for path in paths
+    } == {("df_server_fullmesh", "df_inter_server", "df_server_fullmesh")}
+
+
 @pytest.mark.parametrize(
     "routing_mode",
     ["DOR", "SHORTEST_PATH", "FULL_PATH", "ECMP", "MIN_HOPS", "PORT_BALANCED"],

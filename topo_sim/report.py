@@ -10,6 +10,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from .labels import display_workload_name
+
 
 PAGE_BG = colors.HexColor("#020617")
 CARD_BG = colors.HexColor("#111827")
@@ -87,7 +89,7 @@ def _default_throughput_rows(item: dict[str, Any]) -> list[list[str]]:
     return [
         ["Workload", "Route", "Per SSU Throughput (Gbps)"],
         ["A2A", label, f"{highlight['a2a_per_ssu_throughput_gbps']:.2f}"],
-        ["Sparse 1-to-N", label, f"{highlight['sparse_per_ssu_throughput_gbps']:.2f}"],
+        [display_workload_name("Sparse 1-to-N"), label, f"{highlight['sparse_per_ssu_throughput_gbps']:.2f}"],
     ]
 
 
@@ -101,6 +103,8 @@ def _comparison_table_rows(section: dict[str, Any], columns: list[dict[str, str]
                 rendered.append(f"{value:.2f} Gbps")
             elif column["key"] in {"completion_time_s", "completion_time_p95_s"}:
                 rendered.append(f"{value:.4f} s")
+            elif column["key"] == "average_hops":
+                rendered.append(f"{value:.2f}")
             elif column["key"] == "max_link_utilization":
                 rendered.append(f"{value * 100:.2f}%")
             else:
@@ -111,20 +115,22 @@ def _comparison_table_rows(section: dict[str, Any], columns: list[dict[str, str]
 
 def _single_route_summary_rows(item: dict[str, Any]) -> list[list[str]]:
     return [
-        ["Workload", "Per SSU Throughput", "Completion Time", "P95 Completion", "Max Link Utilization", "Link Utilization CV"],
+        ["Workload", "Per SSU Throughput", "Completion Time", "P95 Completion", "Average Hops", "Max Link Utilization", "Link Utilization CV"],
         [
             "A2A",
             f"{item['communication_metrics']['A2A']['per_ssu_throughput_gbps']:.2f} Gbps",
             f"{item['communication_metrics']['A2A']['completion_time_s']:.4f} s",
             f"{item['communication_metrics']['A2A']['completion_time_p95_s']:.4f} s",
+            f"{item['communication_metrics']['A2A']['average_hops']:.2f}",
             f"{item['communication_metrics']['A2A']['max_link_utilization'] * 100:.2f}%",
             f"{item['communication_metrics']['A2A']['link_utilization_cv']:.3f}",
         ],
         [
-            "Sparse 1-to-N",
+            display_workload_name("Sparse 1-to-N"),
             f"{item['communication_metrics']['Sparse 1-to-N']['per_ssu_throughput_gbps']:.2f} Gbps",
             f"{item['communication_metrics']['Sparse 1-to-N']['completion_time_s']:.4f} s",
             f"{item['communication_metrics']['Sparse 1-to-N']['completion_time_p95_s']:.4f} s",
+            f"{item['communication_metrics']['Sparse 1-to-N']['average_hops']:.2f}",
             f"{item['communication_metrics']['Sparse 1-to-N']['max_link_utilization'] * 100:.2f}%",
             f"{item['communication_metrics']['Sparse 1-to-N']['link_utilization_cv']:.3f}",
         ],
@@ -294,7 +300,7 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
             story.append(Spacer(1, 7))
 
         story.append(Paragraph("Default Route Throughput", styles["SectionHeading"]))
-        story.append(_styled_table(_default_throughput_rows(item), [40 * mm, 54 * mm, 70 * mm]))
+        story.append(_styled_table(_default_throughput_rows(item), [44 * mm, 50 * mm, 70 * mm]))
         story.append(Spacer(1, 7))
 
         story.append(Paragraph("Structural Metrics", styles["SectionHeading"]))
@@ -307,16 +313,16 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
                 story.append(
                     _styled_table(
                         _comparison_table_rows(section, item["routing_comparison"]["columns"]),
-                        [28 * mm, 28 * mm, 24 * mm, 24 * mm, 28 * mm, 24 * mm],
+                        [23 * mm, 25 * mm, 21 * mm, 21 * mm, 18 * mm, 24 * mm, 20 * mm],
                     )
                 )
                 story.append(Spacer(1, 7))
         else:
-            story.append(Paragraph("ECMP Workload Summary", styles["SectionHeading"]))
+            story.append(Paragraph(f"{item['routing']['mode']} Workload Summary", styles["SectionHeading"]))
             story.append(
                 _styled_table(
                     _single_route_summary_rows(item),
-                    [28 * mm, 30 * mm, 28 * mm, 28 * mm, 34 * mm, 26 * mm],
+                    [26 * mm, 28 * mm, 24 * mm, 24 * mm, 18 * mm, 28 * mm, 20 * mm],
                 )
             )
             story.append(Spacer(1, 7))

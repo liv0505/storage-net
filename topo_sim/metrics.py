@@ -3,7 +3,7 @@ from __future__ import annotations
 import statistics
 from collections import defaultdict
 from itertools import combinations
-from typing import Iterable
+from typing import Any, Iterable
 
 import networkx as nx
 import numpy as np
@@ -14,10 +14,11 @@ from .traffic import FlowDemand, build_a2a_demands
 
 
 Edge = tuple[object, object]
+WorkloadDetails = dict[str, Any]
 
 
 def _edge_key(u: object, v: object) -> Edge:
-    return tuple(sorted((u, v), key=lambda x: str(x)))
+    return (u, v)
 
 
 def _ssu_nodes(g: nx.Graph) -> list[str]:
@@ -54,6 +55,17 @@ def _infer_direct_topology_kind(g: nx.Graph) -> str | None:
     if {"3d_torus_x", "3d_torus_y", "3d_torus_z"}.issubset(backend_roles):
         return "3D-TORUS"
     return None
+
+
+def _is_df_topology(g: nx.Graph) -> bool:
+    return str(g.graph.get("topology_name", "")).upper() == "DF"
+
+
+def _server_id(g: nx.Graph, node_id: str) -> int | None:
+    value = g.nodes[node_id].get("server_id")
+    if value is None:
+        return None
+    return int(value)
 
 
 def _build_union_plane_graph(g: nx.Graph, union_label: str) -> nx.Graph:
@@ -131,11 +143,73 @@ def _candidate_exchange_partitions(g: nx.Graph) -> list[frozenset[str]]:
             partitions.append(frozenset(side_a))
         return partitions
 
+    if _is_df_topology(g):
+        partitions = _df_candidate_exchange_partitions(g, exchange_ids, half)
+        if partitions:
+            return partitions
+
+    if exchange_count > 18:
+        return _sliding_window_exchange_partitions(exchange_ids, half)
+
     fixed = exchange_ids[0]
     return [
         frozenset((fixed, *combo))
         for combo in combinations(exchange_ids[1:], half - 1)
     ]
+
+
+def _df_candidate_exchange_partitions(
+    g: nx.Graph,
+    exchange_ids: list[str],
+    half: int,
+) -> list[frozenset[str]]:
+    exchanges_by_server: dict[int, list[str]] = defaultdict(list)
+    for exchange_id in exchange_ids:
+        server = _server_id(g, f"{exchange_id}:union0")
+        if server is None:
+            return []
+        exchanges_by_server[server].append(exchange_id)
+
+    ordered_servers = sorted(exchanges_by_server)
+    if not ordered_servers:
+        return []
+
+    ordered_groups = [sorted(exchanges_by_server[server], key=lambda value: int(value.removeprefix("en"))) for server in ordered_servers]
+    partitions: list[frozenset[str]] = []
+    seen: set[frozenset[str]] = set()
+
+    for start in range(len(ordered_groups)):
+        selected: list[str] = []
+        cursor = start
+        while len(selected) < half:
+            group = ordered_groups[cursor % len(ordered_groups)]
+            remaining = half - len(selected)
+            selected.extend(group[:remaining])
+            cursor += 1
+        partition = frozenset(selected)
+        if len(partition) == half and partition not in seen:
+            seen.add(partition)
+            partitions.append(partition)
+
+    return partitions
+
+
+def _sliding_window_exchange_partitions(
+    exchange_ids: list[str],
+    half: int,
+) -> list[frozenset[str]]:
+    if not exchange_ids or half <= 0:
+        return []
+
+    circular = exchange_ids + exchange_ids[: half - 1]
+    seen: set[frozenset[str]] = set()
+    partitions: list[frozenset[str]] = []
+    for start in range(len(exchange_ids)):
+        partition = frozenset(circular[start : start + half])
+        if len(partition) == half and partition not in seen:
+            seen.add(partition)
+            partitions.append(partition)
+    return partitions
 
 
 def _backend_only_balanced_bisection_bandwidth_gbps(g: nx.Graph) -> float:
@@ -240,29 +314,45 @@ def _completion_time_from_edge_loads(
     return float(max(edge_times) if edge_times else 0.0)
 
 
+def _expected_hops_from_paths(paths: list[RoutedPath]) -> float:
+    usable_paths = [path for path in paths if path.weight > 0]
+    if not usable_paths:
+        return 0.0
+
+    total_weight = sum(path.weight for path in usable_paths)
+    if total_weight <= 0:
+        return 0.0
+
+    return float(
+        sum(path.hops * (path.weight / total_weight) for path in usable_paths)
+    )
+
+
 def _accumulate_routed_paths(
     edge_load_bits: dict[Edge, float],
     source_edge_load_bits: dict[str, dict[Edge, float]],
     demand: FlowDemand,
     paths: list[RoutedPath],
-) -> bool:
+) -> tuple[bool, float]:
     paths = [path for path in paths if path.weight > 0]
     if not paths:
-        return False
+        return False, 0.0
 
     total_weight = sum(path.weight for path in paths)
     if total_weight <= 0:
-        return False
+        return False, 0.0
 
     bits = float(demand.bits)
+    expected_hops = 0.0
     for path in paths:
         split_weight = path.weight / total_weight
+        expected_hops += path.hops * split_weight
         split_bits = bits * split_weight
         for u, v in zip(path.nodes[:-1], path.nodes[1:]):
             key = _edge_key(u, v)
             edge_load_bits[key] += split_bits
             source_edge_load_bits[demand.src][key] += split_bits
-    return True
+    return True, float(expected_hops)
 
 
 def _should_use_exact_shortest_path_fast_path(g: nx.Graph, routing_mode: str) -> bool:
@@ -349,7 +439,7 @@ def _evaluate_shortest_path_workload_exact_fast(
     g: nx.Graph,
     demands: Iterable[FlowDemand],
     cfg: AnalysisConfig,
-) -> dict[str, float]:
+) -> WorkloadDetails:
     edge_load_bits: dict[Edge, float] = defaultdict(float)
     source_edge_load_bits: dict[str, dict[Edge, float]] = defaultdict(lambda: defaultdict(float))
     fallback_path_cache: dict[tuple[str, str], list[RoutedPath]] = {}
@@ -357,6 +447,7 @@ def _evaluate_shortest_path_workload_exact_fast(
     fraction_cache: dict[tuple[str, str, str], list[tuple[Edge, float]]] = {}
 
     routed_demand_bits = 0.0
+    routed_hop_weighted_sum = 0.0
     active_sources: set[str] = set()
 
     for demand in demands:
@@ -372,11 +463,18 @@ def _evaluate_shortest_path_workload_exact_fast(
             pair = (demand.src, demand.dst)
             if pair not in fallback_path_cache:
                 fallback_path_cache[pair] = compute_paths(g, demand.src, demand.dst, "SHORTEST_PATH", cfg)
-            if _accumulate_routed_paths(edge_load_bits, source_edge_load_bits, demand, fallback_path_cache[pair]):
+            routed, expected_hops = _accumulate_routed_paths(
+                edge_load_bits,
+                source_edge_load_bits,
+                demand,
+                fallback_path_cache[pair],
+            )
+            if routed:
                 routed_demand_bits += bits
+                routed_hop_weighted_sum += bits * expected_hops
             continue
 
-        plane_payloads: list[tuple[str, str, list[tuple[Edge, float]]]] = []
+        plane_payloads: list[tuple[str, str, list[tuple[Edge, float]], float]] = []
         for source_union in _source_union_ids(g, demand.src):
             union_label = _union_label(source_union)
             dst_union = f"{dst_exchange}:{union_label}"
@@ -386,15 +484,20 @@ def _evaluate_shortest_path_workload_exact_fast(
                 fraction_cache[cache_key] = _shortest_edge_fractions(plane_graph, source_union, dst_union)
             fractions = fraction_cache[cache_key]
             if fractions:
-                plane_payloads.append((source_union, dst_union, fractions))
+                plane_graph = plane_graph_cache.setdefault(union_label, _build_union_plane_graph(g, union_label))
+                backend_hops = nx.shortest_path_length(plane_graph, source_union, dst_union)
+                plane_payloads.append((source_union, dst_union, fractions, float(backend_hops + 2)))
 
         if not plane_payloads:
             continue
 
         routed_demand_bits += bits
+        routed_hop_weighted_sum += bits * (
+            sum(payload[3] for payload in plane_payloads) / float(len(plane_payloads))
+        )
         plane_bits = bits / float(len(plane_payloads))
 
-        for source_union, dst_union, fractions in plane_payloads:
+        for source_union, dst_union, fractions, _ in plane_payloads:
             src_internal = _edge_key(demand.src, source_union)
             edge_load_bits[src_internal] += plane_bits
             source_edge_load_bits[demand.src][src_internal] += plane_bits
@@ -408,24 +511,36 @@ def _evaluate_shortest_path_workload_exact_fast(
                 edge_load_bits[edge_key] += split_bits
                 source_edge_load_bits[demand.src][edge_key] += split_bits
 
-    return _finalize_workload_metrics(g, edge_load_bits, source_edge_load_bits, routed_demand_bits, active_sources, cfg)
+    return _finalize_workload_details(
+        g,
+        edge_load_bits,
+        source_edge_load_bits,
+        routed_demand_bits,
+        routed_hop_weighted_sum,
+        active_sources,
+        cfg,
+    )
 
 
-def _projection_from_paths(paths: list[RoutedPath]) -> tuple[dict[str, float], dict[str, float], dict[Edge, float]]:
+def _projection_from_paths(
+    paths: list[RoutedPath],
+) -> tuple[dict[str, float], dict[str, float], dict[Edge, float], float]:
     usable_paths = [path for path in paths if path.weight > 0]
     if not usable_paths:
-        return {}, {}, {}
+        return {}, {}, {}, 0.0
 
     total_weight = sum(path.weight for path in usable_paths)
     if total_weight <= 0:
-        return {}, {}, {}
+        return {}, {}, {}, 0.0
 
     source_union_fractions: dict[str, float] = defaultdict(float)
     destination_union_fractions: dict[str, float] = defaultdict(float)
     backend_edge_fractions: dict[Edge, float] = defaultdict(float)
+    expected_hops = 0.0
 
     for path in usable_paths:
         normalized_weight = path.weight / total_weight
+        expected_hops += path.hops * normalized_weight
         if len(path.nodes) < 4:
             continue
         source_union = str(path.nodes[1])
@@ -436,7 +551,12 @@ def _projection_from_paths(paths: list[RoutedPath]) -> tuple[dict[str, float], d
         for u, v in zip(path.nodes[1:-2], path.nodes[2:-1]):
             backend_edge_fractions[_edge_key(u, v)] += normalized_weight
 
-    return dict(source_union_fractions), dict(destination_union_fractions), dict(backend_edge_fractions)
+    return (
+        dict(source_union_fractions),
+        dict(destination_union_fractions),
+        dict(backend_edge_fractions),
+        float(expected_hops),
+    )
 
 
 def _evaluate_direct_workload_projection_fast(
@@ -444,14 +564,18 @@ def _evaluate_direct_workload_projection_fast(
     demands: Iterable[FlowDemand],
     routing_mode: str,
     cfg: AnalysisConfig,
-) -> dict[str, float]:
+) -> WorkloadDetails:
     edge_load_bits: dict[Edge, float] = defaultdict(float)
     source_edge_load_bits: dict[str, dict[Edge, float]] = defaultdict(lambda: defaultdict(float))
     same_exchange_path_cache: dict[tuple[str, str], list[RoutedPath]] = {}
-    projection_cache: dict[tuple[str, str, str], tuple[dict[str, float], dict[str, float], dict[Edge, float]]] = {}
+    projection_cache: dict[
+        tuple[str, str, str],
+        tuple[dict[str, float], dict[str, float], dict[Edge, float], float],
+    ] = {}
 
     normalized_mode = normalize_routing_mode(routing_mode)
     routed_demand_bits = 0.0
+    routed_hop_weighted_sum = 0.0
     active_sources: set[str] = set()
 
     for demand in demands:
@@ -467,8 +591,15 @@ def _evaluate_direct_workload_projection_fast(
             pair = (demand.src, demand.dst)
             if pair not in same_exchange_path_cache:
                 same_exchange_path_cache[pair] = compute_paths(g, demand.src, demand.dst, normalized_mode, cfg)
-            if _accumulate_routed_paths(edge_load_bits, source_edge_load_bits, demand, same_exchange_path_cache[pair]):
+            routed, expected_hops = _accumulate_routed_paths(
+                edge_load_bits,
+                source_edge_load_bits,
+                demand,
+                same_exchange_path_cache[pair],
+            )
+            if routed:
                 routed_demand_bits += bits
+                routed_hop_weighted_sum += bits * expected_hops
             continue
 
         cache_key = (src_exchange, dst_exchange, normalized_mode)
@@ -479,11 +610,17 @@ def _evaluate_direct_workload_projection_fast(
                 compute_paths(g, representative_src, representative_dst, normalized_mode, cfg)
             )
 
-        source_union_fractions, destination_union_fractions, backend_edge_fractions = projection_cache[cache_key]
+        (
+            source_union_fractions,
+            destination_union_fractions,
+            backend_edge_fractions,
+            expected_hops,
+        ) = projection_cache[cache_key]
         if not source_union_fractions and not destination_union_fractions and not backend_edge_fractions:
             continue
 
         routed_demand_bits += bits
+        routed_hop_weighted_sum += bits * expected_hops
 
         for source_union, fraction in source_union_fractions.items():
             split_bits = bits * fraction
@@ -502,17 +639,26 @@ def _evaluate_direct_workload_projection_fast(
             edge_load_bits[edge_key] += split_bits
             source_edge_load_bits[demand.src][edge_key] += split_bits
 
-    return _finalize_workload_metrics(g, edge_load_bits, source_edge_load_bits, routed_demand_bits, active_sources, cfg)
+    return _finalize_workload_details(
+        g,
+        edge_load_bits,
+        source_edge_load_bits,
+        routed_demand_bits,
+        routed_hop_weighted_sum,
+        active_sources,
+        cfg,
+    )
 
 
-def _finalize_workload_metrics(
+def _finalize_workload_details(
     g: nx.Graph,
     edge_load_bits: dict[Edge, float],
     source_edge_load_bits: dict[str, dict[Edge, float]],
     routed_demand_bits: float,
+    routed_hop_weighted_sum: float,
     active_sources: set[str],
     cfg: AnalysisConfig,
-) -> dict[str, float]:
+) -> WorkloadDetails:
     completion_time_s = _completion_time_from_edge_loads(g, edge_load_bits, cfg)
 
     source_completion_times_s: list[float] = []
@@ -533,16 +679,14 @@ def _finalize_workload_metrics(
         if edge_data.get("link_kind") != "backend_interconnect":
             continue
 
-        key = _edge_key(u, v)
-        offered_bits = edge_load_bits.get(key, 0.0)
         capacity_bps = _edge_capacity_bits_per_s(edge_data, cfg)
-
-        if completion_time_s > 0:
-            utilization = offered_bits / (capacity_bps * completion_time_s)
-        else:
-            utilization = 0.0
-
-        backend_link_utilization.append(float(utilization))
+        for src_node, dst_node in ((u, v), (v, u)):
+            offered_bits = edge_load_bits.get(_edge_key(src_node, dst_node), 0.0)
+            if completion_time_s > 0:
+                utilization = offered_bits / (capacity_bps * completion_time_s)
+            else:
+                utilization = 0.0
+            backend_link_utilization.append(float(utilization))
 
     max_link_utilization = float(max(backend_link_utilization) if backend_link_utilization else 0.0)
 
@@ -564,13 +708,26 @@ def _finalize_workload_metrics(
     else:
         per_ssu_throughput_gbps = 0.0
 
-    return {
+    average_hops = (
+        float(routed_hop_weighted_sum / routed_demand_bits) if routed_demand_bits > 0 else 0.0
+    )
+
+    metrics = {
         "completion_time_s": completion_time_s,
         "completion_time_p50_s": completion_time_p50_s,
         "completion_time_p95_s": completion_time_p95_s,
         "per_ssu_throughput_gbps": per_ssu_throughput_gbps,
+        "average_hops": average_hops,
         "max_link_utilization": max_link_utilization,
         "link_utilization_cv": link_utilization_cv,
+    }
+    return {
+        "metrics": metrics,
+        "edge_load_bits": {
+            edge_key: float(offered_bits)
+            for edge_key, offered_bits in edge_load_bits.items()
+            if offered_bits > 0
+        },
     }
 
 
@@ -579,12 +736,13 @@ def _evaluate_workload_via_explicit_paths(
     demands: Iterable[FlowDemand],
     routing_mode: str,
     cfg: AnalysisConfig,
-) -> dict[str, float]:
+) -> WorkloadDetails:
     edge_load_bits: dict[Edge, float] = defaultdict(float)
     source_edge_load_bits: dict[str, dict[Edge, float]] = defaultdict(lambda: defaultdict(float))
     path_cache: dict[tuple[str, str], list[RoutedPath]] = {}
 
     routed_demand_bits = 0.0
+    routed_hop_weighted_sum = 0.0
     active_sources: set[str] = set()
 
     for demand in demands:
@@ -598,10 +756,38 @@ def _evaluate_workload_via_explicit_paths(
         if pair not in path_cache:
             path_cache[pair] = compute_paths(g, demand.src, demand.dst, routing_mode, cfg)
 
-        if _accumulate_routed_paths(edge_load_bits, source_edge_load_bits, demand, path_cache[pair]):
+        routed, expected_hops = _accumulate_routed_paths(
+            edge_load_bits,
+            source_edge_load_bits,
+            demand,
+            path_cache[pair],
+        )
+        if routed:
             routed_demand_bits += bits
+            routed_hop_weighted_sum += bits * expected_hops
 
-    return _finalize_workload_metrics(g, edge_load_bits, source_edge_load_bits, routed_demand_bits, active_sources, cfg)
+    return _finalize_workload_details(
+        g,
+        edge_load_bits,
+        source_edge_load_bits,
+        routed_demand_bits,
+        routed_hop_weighted_sum,
+        active_sources,
+        cfg,
+    )
+
+
+def evaluate_workload_with_details(
+    g: nx.Graph,
+    demands: Iterable[FlowDemand],
+    routing_mode: str,
+    cfg: AnalysisConfig,
+) -> WorkloadDetails:
+    if _should_use_exact_shortest_path_fast_path(g, routing_mode):
+        return _evaluate_shortest_path_workload_exact_fast(g, demands, cfg)
+    if _should_use_direct_projection_fast_path(g, routing_mode):
+        return _evaluate_direct_workload_projection_fast(g, demands, routing_mode, cfg)
+    return _evaluate_workload_via_explicit_paths(g, demands, routing_mode, cfg)
 
 
 def evaluate_workload(
@@ -610,11 +796,14 @@ def evaluate_workload(
     routing_mode: str,
     cfg: AnalysisConfig,
 ) -> dict[str, float]:
-    if _should_use_exact_shortest_path_fast_path(g, routing_mode):
-        return _evaluate_shortest_path_workload_exact_fast(g, demands, cfg)
-    if _should_use_direct_projection_fast_path(g, routing_mode):
-        return _evaluate_direct_workload_projection_fast(g, demands, routing_mode, cfg)
-    return _evaluate_workload_via_explicit_paths(g, demands, routing_mode, cfg)
+    return dict(
+        evaluate_workload_with_details(
+            g,
+            demands,
+            routing_mode=routing_mode,
+            cfg=cfg,
+        )["metrics"]
+    )
 
 
 def compute_topology_metrics(g: nx.Graph, cfg: AnalysisConfig) -> dict[str, float]:

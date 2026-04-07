@@ -1,7 +1,7 @@
 ﻿import pytest
 
 from topo_sim.config import AnalysisConfig
-from topo_sim.metrics import compute_structural_metrics, evaluate_workload
+from topo_sim.metrics import compute_structural_metrics, evaluate_workload, evaluate_workload_with_details
 from topo_sim.topologies import build_topology
 from topo_sim.traffic import FlowDemand, build_a2a_demands
 
@@ -83,6 +83,51 @@ def test_backend_utilization_metrics_ignore_internal_only_routes():
     assert result["link_utilization_cv"] == 0.0
     assert result["completion_time_p50_s"] >= 0
     assert result["completion_time_p95_s"] >= 0
+
+
+def test_completion_time_uses_directional_edge_loads():
+    cfg = AnalysisConfig()
+    g = build_topology("2D-FullMesh", cfg)
+    bidirectional_demands = [
+        FlowDemand(src="en0:ssu0", dst="en1:ssu0", bits=_message_bits(cfg)),
+        FlowDemand(src="en1:ssu0", dst="en0:ssu0", bits=_message_bits(cfg)),
+    ]
+    single_direction_demand = [FlowDemand(src="en0:ssu0", dst="en1:ssu0", bits=_message_bits(cfg))]
+
+    forward_only = evaluate_workload(g, single_direction_demand, routing_mode="DOR", cfg=cfg)
+    bidirectional = evaluate_workload(g, bidirectional_demands, routing_mode="DOR", cfg=cfg)
+
+    assert bidirectional["completion_time_s"] == pytest.approx(forward_only["completion_time_s"])
+    assert bidirectional["max_link_utilization"] == pytest.approx(
+        forward_only["max_link_utilization"]
+    )
+
+
+def test_workload_details_keep_opposite_directions_separate():
+    cfg = AnalysisConfig()
+    g = build_topology("2D-FullMesh", cfg)
+    demands = [
+        FlowDemand(src="en0:ssu0", dst="en1:ssu0", bits=_message_bits(cfg)),
+        FlowDemand(src="en1:ssu0", dst="en0:ssu0", bits=_message_bits(cfg)),
+    ]
+
+    details = evaluate_workload_with_details(g, demands, routing_mode="DOR", cfg=cfg)
+    metrics_only = evaluate_workload(g, demands, routing_mode="DOR", cfg=cfg)
+    edge_load_bits = details["edge_load_bits"]
+
+    assert details["metrics"] == pytest.approx(metrics_only)
+    assert ("en0:union0", "en1:union0") in edge_load_bits
+    assert ("en1:union0", "en0:union0") in edge_load_bits
+    assert edge_load_bits[("en0:union0", "en1:union0")] > 0
+    assert edge_load_bits[("en1:union0", "en0:union0")] > 0
+
+
+def test_df_structural_metrics_complete_with_server_aware_bisection_candidates():
+    g = build_topology("DF", AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] > 0
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] > 0
 
 
 @pytest.mark.parametrize("routing_mode", ["DOR", "FULL_PATH"])

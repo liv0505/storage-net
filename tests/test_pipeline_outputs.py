@@ -21,12 +21,14 @@ EXPECTED_SUMMARY_HEADERS = [
     "a2a_completion_time_p50_s",
     "a2a_completion_time_p95_s",
     "a2a_per_ssu_throughput_gbps",
+    "a2a_average_hops",
     "a2a_max_link_utilization",
     "a2a_link_utilization_cv",
     "sparse_completion_time_s",
     "sparse_completion_time_p50_s",
     "sparse_completion_time_p95_s",
     "sparse_per_ssu_throughput_gbps",
+    "sparse_average_hops",
     "sparse_max_link_utilization",
     "sparse_link_utilization_cv",
 ]
@@ -72,13 +74,32 @@ def test_dashboard_and_report_use_new_labels(output_dir: Path):
     paths = run_full_analysis(cfg, ["2D-Torus"])
 
     html = paths["html"].read_text(encoding="utf-8")
-    assert "A2A Per SSU Throughput" in html
     assert "Bisection BW / SSU" in html
-    assert "Sparse 1-to-N" in html
-    assert "Routing Mode" in html
-    assert "same-exchange SSU traffic stays inside the exchange node via Union switching" in html
-    assert "source SSU traffic evenly splits across both local 200 Gbps uplinks into the two Union planes" in html
-    assert "each Union plane can use every available backend egress port" in html
+    assert "Sparse M-to-N" in html
+    assert "Workload Setup" in html
+    assert "Routing Comparison" in html
+    assert "A2A Directional Traffic" in html
+    assert "Sparse M-to-N Directional Traffic" in html
+    assert "Topology Switcher" in html
+    assert "All Topology Comparison" in html
+    assert "All Topologies" in html
+    assert "SSU-Union Links" in html
+    assert "Union-Union Links" in html
+    assert "Quick Analysis" in html
+    assert "A2A Throughput" in html
+    assert "data-topology-tab" in html
+    assert "Theoretical Bandwidth:" in html
+    assert "Total Carried Rate:" in html
+    assert "Source SSU" in html
+    assert "Destination SSU" in html
+    assert "Traffic Models" in html
+    assert "Routing Modes" in html
+    assert "Active Mode" not in html
+    assert "Sparse Active Ratio" not in html
+    assert "Sparse Target Count" not in html
+    assert "Show Notes" not in html
+    assert "SSUs stay on the bottom row and Unions sit on the layer above inside each exchange node." not in html
+    assert "Exchange nodes are arranged on a structured horizontal and vertical grid." not in html
     assert "FULL_PATH" in html
     assert "PORT_BALANCED" not in html
     assert "A2Av Efficiency" not in html
@@ -87,6 +108,7 @@ def test_dashboard_and_report_use_new_labels(output_dir: Path):
     assert paths["pdf"].stat().st_size > 0
     pdf_text = paths["pdf"].read_bytes().decode("latin1", errors="ignore")
     assert "FULL_PATH" in pdf_text
+    assert "Sparse M-to-N" in pdf_text
     assert "PORT_BALANCED" not in pdf_text
     assert "same-exchange SSU traffic stays inside the exchange node via Union switching" in pdf_text
 
@@ -147,7 +169,6 @@ def test_dashboard_includes_routing_diversity_snapshot(output_dir: Path):
     paths = run_full_analysis(cfg, ["2D-Torus"])
 
     html = paths["html"].read_text(encoding="utf-8")
-    assert "Routing Diversity Snapshot" in html
     assert "SHORTEST_PATH vs DOR" in html
 
 
@@ -157,21 +178,23 @@ def test_direct_topology_outputs_compact_routing_comparison_sections(output_dir:
 
     html = paths["html"].read_text(encoding="utf-8")
     assert "A2A Routing Comparison" in html
-    assert "Sparse 1-to-N Routing Comparison" in html
+    assert "Sparse M-to-N Routing Comparison" in html
     assert "Per SSU Throughput" in html
     assert "Completion Time" in html
     assert "P95 Completion" in html
+    assert "Average Hops" in html
     assert "Max Link Utilization" in html
     assert "Link Utilization CV" in html
     assert "DOR" in html
     assert "SHORTEST_PATH" in html
     assert "FULL_PATH" in html
-    assert "Default Route Throughput" in html
-    assert "DOR Throughput" in html
+    assert "Workload Setup" in html
+    assert "Traffic Models" in html
+    assert "Routing Modes" in html
 
     pdf_text = paths["pdf"].read_bytes().decode("latin1", errors="ignore")
     assert "A2A Routing Comparison" in pdf_text
-    assert "Sparse 1-to-N Routing Comparison" in pdf_text
+    assert "Sparse M-to-N Routing Comparison" in pdf_text
     assert "Default Route Throughput" in pdf_text
     assert "DOR Throughput" in pdf_text
 
@@ -182,15 +205,35 @@ def test_clos_outputs_only_ecmp_without_direct_routing_comparison_sections(outpu
 
     html = paths["html"].read_text(encoding="utf-8")
     assert "A2A Routing Comparison" not in html
-    assert "Sparse 1-to-N Routing Comparison" not in html
-    assert "Default Route Throughput" in html
-    assert "ECMP Throughput" in html
-    assert "DOR Throughput" not in html
+    assert "Sparse M-to-N Routing Comparison" not in html
+    assert "Workload Setup" in html
+    assert "Routing Modes" in html
+    assert "ECMP" in html
 
     pdf_text = paths["pdf"].read_bytes().decode("latin1", errors="ignore")
     assert "A2A Routing Comparison" not in pdf_text
-    assert "Sparse 1-to-N Routing Comparison" not in pdf_text
+    assert "Sparse M-to-N Routing Comparison" not in pdf_text
     assert "ECMP Throughput" in pdf_text
+
+
+def test_df_outputs_single_mode_summary_without_direct_routing_comparison_sections(output_dir: Path):
+    cfg = AnalysisConfig(output_dir=output_dir, routing_mode="FULL_PATH")
+    paths = run_full_analysis(cfg, ["DF"])
+
+    html = paths["html"].read_text(encoding="utf-8")
+    assert "Dragon-Fly" in html
+    assert "A2A Routing Comparison" not in html
+    assert "Sparse M-to-N Routing Comparison" not in html
+    assert "Workload Setup" in html
+    assert "Routing Modes" in html
+    assert "SHORTEST_PATH" in html
+    assert "server0" in html
+    assert "union0" in html
+
+    with paths["csv"].open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 1
+    assert rows[0]["topology"] == "DF"
 
 
 def test_dashboard_click_interaction_payload_includes_incident_bandwidth_labels(output_dir: Path):
@@ -198,7 +241,7 @@ def test_dashboard_click_interaction_payload_includes_incident_bandwidth_labels(
     paths = run_full_analysis(cfg, ["Clos"])
 
     html = paths["html"].read_text(encoding="utf-8")
-    assert "Click a node to highlight one-hop neighbors, incident links, and link bandwidth" in html
+    assert "Click a node to highlight neighbors. Scroll to zoom, drag to pan, and double-click to reset." in html
     assert "incident_link_labels" in html
     assert "bandwidth_gbps" in html
 
@@ -210,7 +253,7 @@ def test_dashboard_uses_black_theme_and_interaction_hooks(output_dir: Path):
     assert "plot-card plot-card-dark" in html
     assert "data-highlight-mode=\"neighbors\"" in html
     assert "registerTopologyHighlight" in html
-    assert html.index("Topology Figure") < html.index("Routing Mode")
+    assert html.index("Topology Figure") < html.index("Workload Setup")
 
 
 def test_dashboard_mentions_layered_layout_rules(output_dir: Path):
@@ -218,9 +261,11 @@ def test_dashboard_mentions_layered_layout_rules(output_dir: Path):
     paths = run_full_analysis(cfg, ["3D-Torus", "Clos"])
 
     html = paths["html"].read_text(encoding="utf-8")
-    assert "4 z-layers" in html
-    assert "Clos spine layer" in html
-    assert "SSUs stay on the bottom row" in html
+    assert "Clos Spine" in html
+    assert "Source SSU" in html
+    assert "4 z-layers" not in html
+    assert "Clos spine layer" not in html
+    assert "SSUs stay on the bottom row" not in html
 
 
 def test_dashboard_layout_falls_back_when_spring_layout_needs_scipy(output_dir: Path, monkeypatch):

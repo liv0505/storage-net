@@ -14,6 +14,7 @@ _INTERNAL_BW_GBPS = 200.0
 _MIN_CLOS_UPLINKS_PER_PLANE = 1
 _MAX_CLOS_UPLINKS_PER_PLANE = 6
 _CLOS_EXCHANGE_NODE_COUNT = 18
+_MIN_DF_UNIONS_PER_SERVER = 2
 
 
 def _annotate_graph(g: nx.Graph, cfg: AnalysisConfig) -> nx.Graph:
@@ -86,6 +87,20 @@ def _validate_clos_spine_fanout(g: nx.Graph) -> None:
                 "Clos spine fanout must be exactly "
                 f"{_CLOS_EXCHANGE_NODE_COUNT}, got {fanout} for {node_id}"
             )
+
+
+def _is_power_of_two(value: int) -> bool:
+    return value > 0 and (value & (value - 1)) == 0
+
+
+def _validate_df_server_shape(cfg: AnalysisConfig) -> None:
+    unions_per_server = int(cfg.df_unions_per_server)
+    if unions_per_server < _MIN_DF_UNIONS_PER_SERVER or unions_per_server % 2 != 0:
+        raise ValueError("df_unions_per_server must be an even integer >= 2")
+    if not _is_power_of_two(unions_per_server):
+        raise ValueError("df_unions_per_server must be a power of two")
+    if int(cfg.df_external_servers_per_union) <= 0:
+        raise ValueError("df_external_servers_per_union must be > 0")
 
 
 def _add_exchange_node(g: nx.Graph, exchange_node_id: str, cfg: AnalysisConfig) -> dict[str, list[str]]:
@@ -278,11 +293,85 @@ def build_clos(cfg: AnalysisConfig) -> nx.Graph:
     return _annotate_graph(g, cfg)
 
 
+def build_df(cfg: AnalysisConfig) -> nx.Graph:
+    _validate_df_server_shape(cfg)
+
+    g = nx.Graph()
+    unions_per_server = int(cfg.df_unions_per_server)
+    exchange_nodes_per_server = unions_per_server // 2
+    external_servers_per_union = int(cfg.df_external_servers_per_union)
+    server_count = (unions_per_server * external_servers_per_union) + 1
+    inter_server_gateways: dict[tuple[int, int], tuple[str, str]] = {}
+    unions_by_server: dict[int, list[str]] = {}
+
+    exchange_index = 0
+    for server_id in range(server_count):
+        server_unions: list[str] = []
+        for exchange_offset in range(exchange_nodes_per_server):
+            exchange_id = f"en{exchange_index}"
+            exchange = _add_exchange_node(g, exchange_id, cfg)
+
+            for ssu_id in exchange["ssus"]:
+                g.nodes[ssu_id].update(
+                    server_id=server_id,
+                    server_local_exchange_index=exchange_offset,
+                )
+
+            for union_offset, union_id in enumerate(exchange["unions"]):
+                server_local_union_index = (exchange_offset * 2) + union_offset
+                g.nodes[union_id].update(
+                    server_id=server_id,
+                    server_local_exchange_index=exchange_offset,
+                    server_local_union_index=server_local_union_index,
+                )
+                server_unions.append(union_id)
+
+            exchange_index += 1
+
+        unions_by_server[server_id] = server_unions
+
+    for server_id, union_ids in unions_by_server.items():
+        for src_index, src_union_id in enumerate(union_ids):
+            for dst_union_id in union_ids[src_index + 1 :]:
+                _add_backend_link(
+                    g,
+                    src_union_id,
+                    dst_union_id,
+                    topology_role="df_server_fullmesh",
+                )
+
+    for src_server in range(server_count):
+        for src_union_index, src_union_id in enumerate(unions_by_server[src_server]):
+            start_dst_server = src_server + (external_servers_per_union * src_union_index) + 1
+            dst_union_index = unions_per_server - 1 - src_union_index
+            for offset in range(external_servers_per_union):
+                dst_server = (start_dst_server + offset) % server_count
+                dst_union_id = unions_by_server[dst_server][dst_union_index]
+                if g.has_edge(src_union_id, dst_union_id):
+                    continue
+                _add_backend_link(
+                    g,
+                    src_union_id,
+                    dst_union_id,
+                    topology_role="df_inter_server",
+                )
+                inter_server_gateways[(src_server, dst_server)] = (src_union_id, dst_union_id)
+                inter_server_gateways[(dst_server, src_server)] = (dst_union_id, src_union_id)
+
+    g.graph["df_server_count"] = server_count
+    g.graph["df_exchange_nodes_per_server"] = exchange_nodes_per_server
+    g.graph["df_unions_per_server"] = unions_per_server
+    g.graph["df_external_servers_per_union"] = external_servers_per_union
+    g.graph["df_inter_server_gateways"] = inter_server_gateways
+    return _annotate_graph(g, cfg)
+
+
 BUILDERS: dict[str, TopologyBuilder] = {
     "2D-FullMesh": build_2d_fullmesh,
     "2D-Torus": build_2d_torus,
     "3D-Torus": build_3d_torus,
     "Clos": build_clos,
+    "DF": build_df,
 }
 
 
@@ -301,7 +390,9 @@ def build_topology(name: str, cfg: AnalysisConfig) -> nx.Graph:
         raise ValueError(f"Unknown topology '{name}'. Valid: {valid}")
 
     g = builder(cfg)
-    _validate_backend_uniformity(g, next(k for k in BUILDERS if k.lower() == key))
+    canonical_name = next(k for k in BUILDERS if k.lower() == key)
+    g.graph["topology_name"] = canonical_name
+    _validate_backend_uniformity(g, canonical_name)
     return g
 
 

@@ -14,6 +14,8 @@ class AnalysisConfig:
     sparse_target_count: int = 2
     port_balanced_max_detour_hops: int = 1
     clos_uplinks_per_exchange_node: int = 4
+    df_unions_per_server: int = 4
+    df_external_servers_per_union: int = 3
 
     link_bandwidth_gbps: float = 100.0
     hop_latency_us: float = 2.0

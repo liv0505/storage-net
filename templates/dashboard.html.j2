@@ -7,18 +7,18 @@
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
     :root {
-      --bg: #020617;
-      --bg-soft: #0f172a;
-      --card: #111827;
-      --card-soft: #0b1220;
-      --ink: #e5eef9;
-      --muted: #95a3b8;
-      --line: rgba(148, 163, 184, 0.18);
-      --cyan: #38bdf8;
+      --bg: #000000;
+      --bg-soft: #06080d;
+      --card: #0b0f17;
+      --card-soft: #101624;
+      --ink: #e8f4ff;
+      --muted: #8d98ab;
+      --line: rgba(86, 166, 255, 0.16);
+      --cyan: #56a6ff;
       --emerald: #34d399;
-      --amber: #f59e0b;
-      --rose: #fb7185;
-      --shadow: 0 18px 45px rgba(0, 0, 0, 0.44);
+      --amber: #ffbe5c;
+      --rose: #ff8d6a;
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.52);
     }
 
     * { box-sizing: border-box; }
@@ -26,9 +26,9 @@
     body {
       margin: 0;
       background:
-        radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 26%),
-        radial-gradient(circle at 85% 12%, rgba(251, 113, 133, 0.12), transparent 24%),
-        linear-gradient(180deg, #01030a, var(--bg));
+        radial-gradient(circle at top left, rgba(86, 166, 255, 0.14), transparent 24%),
+        radial-gradient(circle at 82% 12%, rgba(255, 190, 92, 0.07), transparent 22%),
+        linear-gradient(180deg, #000000, var(--bg));
       color: var(--ink);
       font-family: "Space Grotesk", "Segoe UI", sans-serif;
       min-height: 100vh;
@@ -41,7 +41,9 @@
     }
 
     .hero {
-      background: linear-gradient(135deg, rgba(8, 15, 29, 0.96), rgba(15, 23, 42, 0.92));
+      background:
+        linear-gradient(135deg, rgba(8, 12, 20, 0.98), rgba(13, 19, 31, 0.96)),
+        radial-gradient(circle at top right, rgba(86, 166, 255, 0.10), transparent 28%);
       border: 1px solid var(--line);
       border-radius: 24px;
       padding: 16px 18px;
@@ -69,16 +71,55 @@
       gap: 16px;
     }
 
+    .topology-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .tab-button {
+      appearance: none;
+      border: 1px solid rgba(86, 166, 255, 0.22);
+      background: rgba(8, 12, 20, 0.92);
+      color: var(--ink);
+      padding: 10px 14px;
+      border-radius: 999px;
+      font: inherit;
+      font-size: 12px;
+      letter-spacing: 0.24px;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+
+    .tab-button:hover {
+      border-color: rgba(86, 166, 255, 0.42);
+      box-shadow: 0 0 0 1px rgba(86, 166, 255, 0.10), 0 10px 24px rgba(0, 0, 0, 0.36);
+      transform: translateY(-1px);
+    }
+
+    .tab-button.is-active {
+      background: linear-gradient(135deg, rgba(86, 166, 255, 0.16), rgba(10, 15, 24, 0.98));
+      border-color: rgba(86, 166, 255, 0.54);
+      box-shadow: inset 0 0 24px rgba(86, 166, 255, 0.08), 0 10px 28px rgba(0, 0, 0, 0.34);
+      color: #f2fbff;
+    }
+
     .plot-card {
-      background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(9, 14, 27, 0.96));
+      background:
+        linear-gradient(180deg, rgba(10, 14, 22, 0.98), rgba(5, 7, 11, 0.99)),
+        radial-gradient(circle at top right, rgba(86, 166, 255, 0.05), transparent 28%);
       border: 1px solid var(--line);
       border-radius: 24px;
       box-shadow: var(--shadow);
       overflow: hidden;
+      min-width: 0;
     }
 
     .plot-card-dark {
-      background: linear-gradient(180deg, rgba(7, 10, 18, 0.98), rgba(15, 23, 42, 0.98));
+      background:
+        linear-gradient(180deg, rgba(9, 13, 20, 0.98), rgba(4, 6, 10, 0.99)),
+        radial-gradient(circle at top left, rgba(86, 166, 255, 0.04), transparent 30%);
     }
 
     .plot-card-head {
@@ -100,7 +141,7 @@
     }
 
     .plot-shell {
-      padding: 14px 14px 4px;
+      padding: 12px 12px 4px;
     }
 
     .plot-shell h3,
@@ -113,10 +154,21 @@
     }
 
     .plot-frame {
-      border: 1px solid rgba(56, 189, 248, 0.16);
+      border: 1px solid rgba(86, 166, 255, 0.16);
       border-radius: 18px;
-      background: rgba(2, 6, 23, 0.92);
-      padding: 8px;
+      background:
+        linear-gradient(180deg, rgba(0, 0, 0, 0.98), rgba(4, 6, 10, 0.98));
+      padding: 7px;
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    .plot-frame > div,
+    .plot-frame .js-plotly-plot,
+    .plot-frame .plotly,
+    .plot-frame .plot-container {
+      width: 100% !important;
+      min-width: 0;
     }
 
     .plot-caption {
@@ -131,86 +183,115 @@
 
     .plot-caption span {
       display: block;
-      padding: 9px 10px;
+      padding: 7px 10px;
       border-radius: 12px;
-      border: 1px solid rgba(148, 163, 184, 0.12);
-      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(86, 166, 255, 0.10);
+      background: rgba(7, 10, 16, 0.76);
+    }
+
+    .traffic-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+      align-items: start;
+    }
+
+    .traffic-panel {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .traffic-panel .plot-frame {
+      padding: 6px;
     }
 
     .detail-pane {
       display: grid;
-      grid-template-columns: 1.05fr 1.35fr 0.9fr;
-      gap: 14px;
-      padding: 8px 14px 16px;
+      gap: 12px;
+      padding: 6px 12px 14px;
       align-items: start;
     }
 
+    .detail-top-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.75fr);
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .detail-top-grid > .section {
+      height: 100%;
+    }
+
     .section {
-      border: 1px solid rgba(148, 163, 184, 0.12);
+      border: 1px solid rgba(86, 166, 255, 0.10);
       border-radius: 18px;
-      padding: 14px;
-      background: rgba(15, 23, 42, 0.7);
-      min-height: 100%;
+      padding: 11px;
+      background: rgba(7, 10, 16, 0.82);
     }
 
     .metrics-grid,
     .kv-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(130px, 1fr));
-      gap: 10px;
+      gap: 8px;
     }
 
     .metric,
     .kv {
       border-radius: 14px;
-      padding: 10px 11px;
-      background: rgba(2, 6, 23, 0.86);
-      border: 1px solid rgba(148, 163, 184, 0.1);
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.88);
+      border: 1px solid rgba(86, 166, 255, 0.08);
     }
 
     .metric .k,
     .kv .k {
       display: block;
-      font-size: 10px;
+      font-size: 9.5px;
       text-transform: uppercase;
-      letter-spacing: 0.42px;
+      letter-spacing: 0.34px;
       color: var(--muted);
     }
 
     .metric .v,
     .kv .v {
       display: block;
-      margin-top: 4px;
-      line-height: 1.45;
+      margin-top: 2px;
+      line-height: 1.32;
       font-weight: 600;
     }
 
     .stack {
       display: grid;
-      gap: 12px;
+      gap: 8px;
     }
 
     .workload-panel,
     .compact-table-panel {
       border-radius: 16px;
-      padding: 12px;
-      border: 1px solid rgba(148, 163, 184, 0.1);
-      background: rgba(2, 6, 23, 0.86);
+      padding: 10px;
+      border: 1px solid rgba(86, 166, 255, 0.08);
+      background: rgba(0, 0, 0, 0.84);
     }
 
     .workload-panel h4,
     .compact-table-panel h4 {
-      margin: 0 0 10px;
+      margin: 0 0 8px;
       color: var(--amber);
-      font-size: 14px;
+      font-size: 13px;
     }
 
     .compact-table-wrap {
       overflow-x: auto;
+      padding-bottom: 2px;
     }
 
     .compact-table {
-      width: 100%;
+      width: max-content;
+      min-width: 100%;
       border-collapse: collapse;
       font-size: 11px;
       line-height: 1.35;
@@ -255,15 +336,69 @@
       margin-top: 8px;
       padding: 6px 10px;
       border-radius: 999px;
-      border: 1px solid rgba(52, 211, 153, 0.24);
-      background: rgba(52, 211, 153, 0.08);
-      color: #d1fae5;
+      border: 1px solid rgba(86, 166, 255, 0.24);
+      background: rgba(86, 166, 255, 0.08);
+      color: #d9ecff;
       font-size: 11px;
       letter-spacing: 0.2px;
     }
 
+    .details-panel {
+      border: 1px solid rgba(86, 166, 255, 0.08);
+      border-radius: 16px;
+      background: rgba(0, 0, 0, 0.72);
+      overflow: hidden;
+    }
+
+    .details-panel > summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 12px 14px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.18px;
+    }
+
+    .details-panel > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .details-panel > summary::after {
+      content: "+";
+      float: right;
+      color: var(--cyan);
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .details-panel[open] > summary::after {
+      content: "-";
+    }
+
+    .details-body {
+      display: grid;
+      gap: 12px;
+      padding: 0 12px 12px;
+    }
+
+    .topology-panel[hidden] {
+      display: none !important;
+    }
+
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
     @media (max-width: 1280px) {
-      .detail-pane { grid-template-columns: 1fr; }
+      .detail-top-grid { grid-template-columns: 1fr; }
+      .comparison-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 1100px) {
+      .traffic-grid { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 720px) {
@@ -272,6 +407,8 @@
       .plot-shell { padding: 12px 12px 4px; }
       .detail-pane { padding: 8px 12px 14px; }
       .metrics-grid, .kv-grid { grid-template-columns: 1fr; }
+      .topology-tabs { gap: 8px; }
+      .tab-button { width: 100%; justify-content: center; }
     }
   </style>
 </head>
@@ -279,32 +416,80 @@
   <div class="container">
     <section class="hero">
       <h1>SSU-Centric Topology Analysis Dashboard</h1>
-      <p>Topology figures are shown first for direct visual comparison. Each figure uses an explicit layered layout: SSUs at the bottom row, Unions above them, and topology-level structure arranged in deterministic grids instead of force-directed placement.</p>
+      <p>Use the tabs to switch topologies. Hover any traffic link to inspect bidirectional carried rate, utilization, and offered volume.</p>
     </section>
 
     <section class="grid">
-      {% for r in results %}
-      <article class="plot-card plot-card-dark" data-highlight-mode="{{ r.interaction_mode }}">
+      <section class="plot-card plot-card-dark">
         <div class="plot-card-head">
-          <h2>{{ r.name }}</h2>
+          <h2>Topology Switcher</h2>
+          <div class="topology-tabs" role="tablist" aria-label="Topology switcher">
+            {% for r in results %}
+            <button
+              type="button"
+              class="tab-button{% if loop.first %} is-active{% endif %}"
+              data-topology-tab
+              data-target="topology-panel-{{ loop.index0 }}"
+              id="topology-tab-{{ loop.index0 }}"
+              role="tab"
+              aria-controls="topology-panel-{{ loop.index0 }}"
+              aria-selected="{% if loop.first %}true{% else %}false{% endif %}"
+            >
+              {{ r.display_name }}
+            </button>
+            {% endfor %}
+            <button
+              type="button"
+              class="tab-button"
+              data-topology-tab
+              data-target="topology-panel-comparison"
+              id="topology-tab-comparison"
+              role="tab"
+              aria-controls="topology-panel-comparison"
+              aria-selected="false"
+            >
+              All Topologies
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {% for r in results %}
+      <article
+        class="plot-card plot-card-dark topology-panel"
+        data-highlight-mode="{{ r.interaction_mode }}"
+        data-topology-panel="topology-panel-{{ loop.index0 }}"
+        id="topology-panel-{{ loop.index0 }}"
+        role="tabpanel"
+        aria-labelledby="topology-tab-{{ loop.index0 }}"
+        {% if not loop.first %}hidden{% endif %}
+      >
+        <div class="plot-card-head">
+          <h2>{{ r.display_name }}</h2>
           <div class="eyebrow">{{ r.topology.scale }} | {{ r.topology.exchange_node_count }} exchange nodes</div>
-          <div class="interaction-chip">Click a node to highlight one-hop neighbors, incident links, and link bandwidth</div>
+          <div class="interaction-chip">Click a node to highlight neighbors. Scroll to zoom, drag to pan, and double-click to reset.</div>
         </div>
 
         <div class="plot-shell">
           <h3>Topology Figure</h3>
           <div class="plot-frame">{{ r.plot_html | safe }}</div>
-          <div class="plot-caption small-notes">
-            {% for note in r.layout_notes %}
-            <span>{{ note }}</span>
+
+          {% if r.traffic_plots %}
+          <div class="traffic-grid">
+            {% for traffic in r.traffic_plots %}
+            <div class="traffic-panel">
+              <h3>{{ traffic.title }}</h3>
+              <div class="plot-frame">{{ traffic.plot_html | safe }}</div>
+            </div>
             {% endfor %}
           </div>
+          {% endif %}
         </div>
 
         <div class="detail-pane">
-          <section class="section">
-            <h3>Key Metrics</h3>
-            <div class="stack">
+          <div class="detail-top-grid">
+            <section class="section">
+              <h3>Key Metrics</h3>
               <div class="metrics-grid">
                 <div class="metric"><span class="k">Diameter</span><span class="v">{{ '%.0f'|format(r.structural_metrics.diameter) }}</span></div>
                 <div class="metric"><span class="k">Average Hops</span><span class="v">{{ '%.2f'|format(r.structural_metrics.average_hops) }}</span></div>
@@ -312,42 +497,45 @@
                 <div class="metric"><span class="k">Bisection BW / SSU</span><span class="v">{{ '%.2f'|format(r.structural_metrics.bisection_bandwidth_gbps_per_ssu) }} Gbps</span></div>
                 <div class="metric"><span class="k">Backend Links</span><span class="v">{{ r.topology.backend_link_count }}</span></div>
               </div>
-              <div class="workload-panel">
-                <h4>Default Route Throughput</h4>
-                <div class="small-notes" style="margin-bottom:10px;">A2A Per SSU Throughput and sparse per-SSU throughput are shown for the default route only.</div>
-                <div class="metrics-grid">
-                  <div class="metric"><span class="k">{{ r.default_routing_highlight.label }}</span><span class="v">A2A {{ '%.2f'|format(r.default_routing_highlight.a2a_per_ssu_throughput_gbps) }} Gbps</span></div>
-                  <div class="metric"><span class="k">{{ r.default_routing_highlight.label }}</span><span class="v">Sparse {{ '%.2f'|format(r.default_routing_highlight.sparse_per_ssu_throughput_gbps) }} Gbps</span></div>
+            </section>
+
+            <section class="section">
+              <h3>Workload Setup</h3>
+              <div class="stack">
+                <div class="workload-panel">
+                  <h4>Traffic Models</h4>
+                  <div class="stack">
+                    {% for workload in r.workload_descriptions %}
+                    <div class="kv">
+                      <span class="k">{{ workload.title }}</span>
+                      <span class="v">{{ workload.description }}</span>
+                    </div>
+                    {% endfor %}
+                  </div>
                 </div>
+
+                <div class="workload-panel">
+                  <h4>Routing Modes</h4>
+                  <div class="stack">
+                    {% for routing_mode in r.routing_mode_descriptions %}
+                    <div class="kv">
+                      <span class="k">{{ routing_mode.mode }}</span>
+                      <span class="v">{{ routing_mode.description }}</span>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </div>
+
+                {% if r.routing_diversity %}
+                <div class="small-notes">{{ r.routing_diversity.summary }}</div>
+                {% endif %}
               </div>
-            </div>
-          </section>
+            </section>
+          </div>
 
           <section class="section">
-            <h3>Routing Mode</h3>
+            <h3>Routing Comparison</h3>
             <div class="stack">
-              <div class="kv-grid">
-                <div class="kv"><span class="k">Active Mode</span><span class="v">{{ r.routing.mode }}</span></div>
-                <div class="kv"><span class="k">Backend Pattern</span><span class="v">{{ r.topology.backend_pattern }}</span></div>
-                <div class="kv"><span class="k">Message Size</span><span class="v">{{ '%.2f'|format(r.workloads.message_size_mb) }} MB</span></div>
-                <div class="kv"><span class="k">Sparse Active Ratio</span><span class="v">{{ '%.0f'|format(r.workloads.sparse_active_ratio * 100) }}%</span></div>
-                <div class="kv"><span class="k">Sparse Target Count</span><span class="v">{{ r.workloads.sparse_target_count }}</span></div>
-                <div class="kv"><span class="k">A2A Scope</span><span class="v">{{ r.workloads.a2a_scope }}</span></div>
-              </div>
-              {% if r.routing_diversity %}
-              <div class="workload-panel">
-                <h4>Routing Diversity Snapshot</h4>
-                <div class="small-notes" style="margin-bottom:10px;">{{ r.routing_diversity.summary }}</div>
-                <div class="metrics-grid">
-                  {% for item in r.routing_diversity.modes %}
-                  <div class="metric">
-                    <span class="k">{{ item.mode }}</span>
-                    <span class="v">Avg {{ '%.2f'|format(item.avg_path_count) }} | Peak {{ item.max_path_count }}</span>
-                  </div>
-                  {% endfor %}
-                </div>
-              </div>
-              {% endif %}
               {% if r.routing_comparison %}
                 {% for section in r.routing_comparison.sections %}
                 <div class="compact-table-panel">
@@ -372,6 +560,8 @@
                             <td>{{ '%.2f'|format(value) }} Gbps</td>
                             {% elif column.key in ['completion_time_s', 'completion_time_p95_s'] %}
                             <td>{{ '%.4f'|format(value) }} s</td>
+                            {% elif column.key == 'average_hops' %}
+                            <td>{{ '%.2f'|format(value) }}</td>
                             {% elif column.key == 'max_link_utilization' %}
                             <td>{{ '%.2f'|format(value * 100) }}%</td>
                             {% else %}
@@ -387,7 +577,7 @@
                 {% endfor %}
               {% else %}
               <div class="compact-table-panel">
-                <h4>ECMP Workload Summary</h4>
+                <h4>{{ r.routing.mode }} Comparison</h4>
                 <div class="compact-table-wrap">
                   <table class="compact-table">
                     <thead>
@@ -396,6 +586,7 @@
                         <th>Per SSU Throughput</th>
                         <th>Completion Time</th>
                         <th>P95 Completion</th>
+                        <th>Average Hops</th>
                         <th>Max Link Utilization</th>
                         <th>Link Utilization CV</th>
                       </tr>
@@ -406,14 +597,16 @@
                         <td>{{ '%.2f'|format(r.communication_metrics['A2A'].per_ssu_throughput_gbps) }} Gbps</td>
                         <td>{{ '%.4f'|format(r.communication_metrics['A2A'].completion_time_s) }} s</td>
                         <td>{{ '%.4f'|format(r.communication_metrics['A2A'].completion_time_p95_s) }} s</td>
+                        <td>{{ '%.2f'|format(r.communication_metrics['A2A'].average_hops) }}</td>
                         <td>{{ '%.2f'|format(r.communication_metrics['A2A'].max_link_utilization * 100) }}%</td>
                         <td>{{ '%.3f'|format(r.communication_metrics['A2A'].link_utilization_cv) }}</td>
                       </tr>
                       <tr>
-                        <td>Sparse 1-to-N</td>
+                        <td>Sparse M-to-N</td>
                         <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].per_ssu_throughput_gbps) }} Gbps</td>
                         <td>{{ '%.4f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_s) }} s</td>
                         <td>{{ '%.4f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_p95_s) }} s</td>
+                        <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].average_hops) }}</td>
                         <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].max_link_utilization * 100) }}%</td>
                         <td>{{ '%.3f'|format(r.communication_metrics['Sparse 1-to-N'].link_utilization_cv) }}</td>
                       </tr>
@@ -424,21 +617,136 @@
               {% endif %}
             </div>
           </section>
-
-          <section class="section small-notes">
-            <h3>Analysis Notes</h3>
-            <ul>
-              {% for note in r.routing.notes %}
-              <li>{{ note }}</li>
-              {% endfor %}
-              {% for note in r.observations %}
-              <li>{{ note }}</li>
-              {% endfor %}
-            </ul>
-          </section>
         </div>
       </article>
       {% endfor %}
+
+      <article
+        class="plot-card plot-card-dark topology-panel"
+        data-topology-panel="topology-panel-comparison"
+        id="topology-panel-comparison"
+        role="tabpanel"
+        aria-labelledby="topology-tab-comparison"
+        hidden
+      >
+        <div class="plot-card-head">
+          <h2>All Topology Comparison</h2>
+          <div class="eyebrow">Cross-topology summary for structure, A2A, and Sparse M-to-N workloads</div>
+        </div>
+        <div class="plot-shell">
+          <div class="comparison-grid">
+            <div class="compact-table-panel">
+              <h4>Structural Overview</h4>
+              <div class="compact-table-wrap">
+                <table class="compact-table">
+                  <thead>
+                    <tr>
+                      <th>Topology</th>
+                      <th>Diameter</th>
+                      <th>Average Hops</th>
+                      <th>SSUs</th>
+                      <th>Unions</th>
+                      <th>SSU-Union Links</th>
+                      <th>Union-Union Links</th>
+                      <th>Bisection BW</th>
+                      <th>Bisection BW / SSU</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for r in results %}
+                    <tr>
+                      <td>{{ r.display_name }}</td>
+                      <td>{{ '%.0f'|format(r.structural_metrics.diameter) }}</td>
+                      <td>{{ '%.2f'|format(r.structural_metrics.average_hops) }}</td>
+                      <td>{{ r.topology.ssu_count }}</td>
+                      <td>{{ r.topology.union_count }}</td>
+                      <td>{{ r.topology.internal_link_count }}</td>
+                      <td>{{ r.topology.backend_link_count }}</td>
+                      <td>{{ '%.1f'|format(r.structural_metrics.bisection_bandwidth_gbps) }} Gbps</td>
+                      <td>{{ '%.2f'|format(r.structural_metrics.bisection_bandwidth_gbps_per_ssu) }} Gbps</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="compact-table-panel">
+              <h4>A2A Comparison</h4>
+              <div class="compact-table-wrap">
+                <table class="compact-table">
+                  <thead>
+                    <tr>
+                      <th>Topology</th>
+                      <th>Per SSU Throughput</th>
+                      <th>Completion Time</th>
+                      <th>Average Hops</th>
+                      <th>Max Link Utilization</th>
+                      <th>Link Utilization CV</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for r in results %}
+                    <tr>
+                      <td>{{ r.display_name }}</td>
+                      <td>{{ '%.2f'|format(r.communication_metrics['A2A'].per_ssu_throughput_gbps) }} Gbps</td>
+                      <td>{{ '%.4f'|format(r.communication_metrics['A2A'].completion_time_s) }} s</td>
+                      <td>{{ '%.2f'|format(r.communication_metrics['A2A'].average_hops) }}</td>
+                      <td>{{ '%.2f'|format(r.communication_metrics['A2A'].max_link_utilization * 100) }}%</td>
+                      <td>{{ '%.3f'|format(r.communication_metrics['A2A'].link_utilization_cv) }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="compact-table-panel">
+              <h4>Sparse M-to-N Comparison</h4>
+              <div class="compact-table-wrap">
+                <table class="compact-table">
+                  <thead>
+                    <tr>
+                      <th>Topology</th>
+                      <th>Per SSU Throughput</th>
+                      <th>P95 Completion</th>
+                      <th>Average Hops</th>
+                      <th>Max Link Utilization</th>
+                      <th>Link Utilization CV</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for r in results %}
+                    <tr>
+                      <td>{{ r.display_name }}</td>
+                      <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].per_ssu_throughput_gbps) }} Gbps</td>
+                      <td>{{ '%.4f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_p95_s) }} s</td>
+                      <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].average_hops) }}</td>
+                      <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].max_link_utilization * 100) }}%</td>
+                      <td>{{ '%.3f'|format(r.communication_metrics['Sparse 1-to-N'].link_utilization_cv) }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {% if comparison_summary %}
+            <div class="compact-table-panel">
+              <h4>Quick Analysis</h4>
+              <div class="stack">
+                {% for item in comparison_summary %}
+                <div class="kv">
+                  <span class="k">{{ item.title }}</span>
+                  <span class="v">{{ item.body }}</span>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </article>
     </section>
   </div>
 
@@ -446,6 +754,46 @@
     function registerTopologyHighlight() {
       return true;
     }
+  </script>
+  <script>
+    (function() {
+      function resizeVisiblePlots(panel) {
+        if (!panel || !window.Plotly || !window.Plotly.Plots) return;
+        window.requestAnimationFrame(function() {
+          panel.querySelectorAll('.js-plotly-plot').forEach(function(plot) {
+            window.Plotly.Plots.resize(plot);
+          });
+        });
+      }
+
+      function activateTopologyPanel(targetId) {
+        const buttons = document.querySelectorAll('[data-topology-tab]');
+        const panels = document.querySelectorAll('[data-topology-panel]');
+        buttons.forEach(function(button) {
+          const isActive = button.getAttribute('data-target') === targetId;
+          button.classList.toggle('is-active', isActive);
+          button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        panels.forEach(function(panel) {
+          const isActive = panel.getAttribute('data-topology-panel') === targetId;
+          panel.hidden = !isActive;
+          if (isActive) {
+            resizeVisiblePlots(panel);
+          }
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('[data-topology-tab]').forEach(function(button) {
+          button.addEventListener('click', function() {
+            activateTopologyPanel(button.getAttribute('data-target'));
+          });
+        });
+
+        const firstPanel = document.querySelector('[data-topology-panel]:not([hidden])');
+        resizeVisiblePlots(firstPanel);
+      });
+    })();
   </script>
   {% for r in results %}
   <script>

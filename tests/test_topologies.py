@@ -5,7 +5,7 @@ from topo_sim.topologies import available_topologies, build_topology
 
 
 def test_available_topologies_only_exposes_new_names():
-    assert available_topologies() == ["2D-FullMesh", "2D-Torus", "3D-Torus", "Clos"]
+    assert available_topologies() == ["2D-FullMesh", "2D-Torus", "3D-Torus", "Clos", "DF"]
 
 
 def test_2d_fullmesh_builds_exchange_nodes_with_expected_parts():
@@ -157,6 +157,84 @@ def test_clos_rejects_negative_uplinks_per_exchange_node():
     cfg = AnalysisConfig(clos_uplinks_per_exchange_node=-1)
     with pytest.raises(ValueError, match="clos_uplinks_per_exchange_node"):
         build_topology("Clos", cfg)
+
+
+def test_df_builds_expected_server_scoped_counts():
+    cfg = AnalysisConfig()
+    g = build_topology("DF", cfg)
+
+    ssu_nodes = [n for n, d in g.nodes(data=True) if d["node_role"] == "ssu"]
+    union_nodes = [n for n, d in g.nodes(data=True) if d["node_role"] == "union"]
+
+    assert len(ssu_nodes) == 26 * 8
+    assert len(union_nodes) == 26 * 2
+    assert g.graph["df_server_count"] == 13
+    assert g.graph["df_exchange_nodes_per_server"] == 2
+
+
+def test_df_has_expected_backend_structure():
+    g = build_topology("DF", AnalysisConfig())
+    backend = [
+        data
+        for _, _, data in g.edges(data=True)
+        if data["link_kind"] == "backend_interconnect"
+    ]
+    assert len(backend) == 156
+    assert {data["topology_role"] for data in backend} == {"df_server_fullmesh", "df_inter_server"}
+
+
+def test_df_gives_each_union_six_backend_ports_by_default():
+    g = build_topology("DF", AnalysisConfig())
+    union_backend_degree = {
+        node_id: sum(
+            1
+            for _, _, data in g.edges(node_id, data=True)
+            if data["link_kind"] == "backend_interconnect"
+        )
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {6}
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_ssus", "expected_unions", "expected_ssu_union_links", "expected_union_union_links"),
+    [
+        ("2D-FullMesh", 128, 32, 256, 96),
+        ("2D-Torus", 128, 32, 256, 64),
+        ("3D-Torus", 512, 128, 1024, 384),
+        ("Clos", 144, 36, 288, 144),
+        ("DF", 208, 52, 416, 156),
+    ],
+)
+def test_topology_hardware_inventory_counts_match_expected_totals(
+    name: str,
+    expected_ssus: int,
+    expected_unions: int,
+    expected_ssu_union_links: int,
+    expected_union_union_links: int,
+):
+    g = build_topology(name, AnalysisConfig())
+
+    actual_ssus = sum(1 for _, data in g.nodes(data=True) if data.get("node_role") == "ssu")
+    actual_unions = sum(1 for _, data in g.nodes(data=True) if data.get("node_role") == "union")
+    actual_ssu_union_links = sum(
+        1 for _, _, data in g.edges(data=True) if data.get("link_kind") == "internal_ssu_uplink"
+    )
+    actual_union_union_links = sum(
+        1 for _, _, data in g.edges(data=True) if data.get("link_kind") == "backend_interconnect"
+    )
+
+    assert actual_ssus == expected_ssus
+    assert actual_unions == expected_unions
+    assert actual_ssu_union_links == expected_ssu_union_links
+    assert actual_union_union_links == expected_union_union_links
+
+
+def test_df_rejects_non_power_of_two_union_count_per_server():
+    with pytest.raises(ValueError, match="df_unions_per_server"):
+        build_topology("DF", AnalysisConfig(df_unions_per_server=6))
 
 
 def test_build_topology_is_case_insensitive_and_trims_whitespace():

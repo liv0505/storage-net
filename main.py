@@ -6,6 +6,7 @@ from pathlib import Path
 
 from topo_sim.config import AnalysisConfig
 from topo_sim.pipeline import run_full_analysis
+from topo_sim.topologies import available_topologies
 
 
 _SUPPORTED_ROUTING_MODES = [
@@ -58,7 +59,7 @@ def _topologies_arg(value: str, valid_names: set[str]) -> str:
 
 def parse_args() -> argparse.Namespace:
     base_cfg = AnalysisConfig()
-    valid_topologies = set(base_cfg.topology_names)
+    valid_topologies = set(available_topologies())
 
     def _parse_topologies(value: str) -> str:
         return _topologies_arg(value, valid_topologies)
@@ -70,7 +71,7 @@ def parse_args() -> argparse.Namespace:
         "--topologies",
         type=_parse_topologies,
         default=",".join(base_cfg.topology_names),
-        help="Comma-separated topology names. Example: 2D-FullMesh,2D-Torus,3D-Torus,Clos",
+        help="Comma-separated topology names. Example: 2D-FullMesh,2D-Torus,3D-Torus,Clos,DF",
     )
     parser.add_argument(
         "--routing-mode",
@@ -99,6 +100,16 @@ def parse_args() -> argparse.Namespace:
         default=base_cfg.clos_uplinks_per_exchange_node,
     )
     parser.add_argument(
+        "--df-unions-per-server",
+        type=_positive_int_arg,
+        default=base_cfg.df_unions_per_server,
+    )
+    parser.add_argument(
+        "--df-external-servers-per-union",
+        type=_positive_int_arg,
+        default=base_cfg.df_external_servers_per_union,
+    )
+    parser.add_argument(
         "--message-size-mb", type=_positive_float_arg, default=base_cfg.message_size_mb
     )
     parser.add_argument(
@@ -124,6 +135,8 @@ def main() -> None:
         sparse_target_count=args.sparse_target_count,
         port_balanced_max_detour_hops=args.port_balanced_max_detour_hops,
         clos_uplinks_per_exchange_node=args.clos_uplinks_per_exchange_node,
+        df_unions_per_server=args.df_unions_per_server,
+        df_external_servers_per_union=args.df_external_servers_per_union,
         link_bandwidth_gbps=args.bandwidth_gbps,
         message_size_mb=args.message_size_mb,
         traffic_samples=args.traffic_samples,
