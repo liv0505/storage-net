@@ -1,0 +1,31 @@
+{
+  "name": "Custom M-to-N",
+  "description": "Example group-based workload with a default M-to-N matrix plus one hot pair override.",
+  "groups": [
+    {
+      "sources": {
+        "exchange_ids": ["en0"],
+        "local_indices": [0, 1]
+      },
+      "destinations": {
+        "exchange_ids": ["en5"],
+        "local_indices": [0, 1, 2]
+      },
+      "default_gb": 1,
+      "pair_overrides": [
+        {
+          "src": "en0:ssu0",
+          "dst": "en5:ssu0",
+          "gb": 4
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "src": "en2:ssu3",
+      "dst": "en7:ssu2",
+      "gb": 2
+    }
+  ]
+}

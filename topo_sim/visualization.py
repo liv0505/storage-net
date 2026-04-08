@@ -26,6 +26,11 @@ _TRAFFIC_DESTINATION_RING_COLOR = "#facc15"
 _PLOT_BG_COLOR = "#000000"
 
 
+def _is_df_name(topology_name: str) -> bool:
+    upper = str(topology_name).strip().upper()
+    return upper == "DF" or upper.startswith("DF-")
+
+
 def _fallback_positions(g: nx.Graph) -> dict[Any, tuple[float, float]]:
     circular = nx.circular_layout(g)
     return {k: (float(v[0]), float(v[1])) for k, v in circular.items()}
@@ -99,6 +104,35 @@ def _oriented_exchange_local_positions(
     return positions
 
 
+def _oriented_df_exchange_local_positions(
+    center_x: float,
+    center_y: float,
+    exchange_node_id: str,
+    tangent: tuple[float, float],
+    inward: tuple[float, float],
+) -> dict[str, tuple[float, float]]:
+    positions: dict[str, tuple[float, float]] = {}
+    ssu_spacing = 0.62
+    tangent_x, tangent_y = tangent
+    inward_x, inward_y = inward
+
+    def _project(local_x: float, local_y: float) -> tuple[float, float]:
+        return (
+            center_x + (local_x * tangent_x) + (local_y * inward_x),
+            center_y + (local_x * tangent_y) + (local_y * inward_y),
+        )
+
+    for ssu_index in range(8):
+        local_x = (ssu_index - 3.5) * ssu_spacing
+        positions[f"{exchange_node_id}:ssu{ssu_index}"] = _project(local_x, 0.0)
+
+    # Two Union chips belong to different DF planes but share the same 8-SSU group.
+    # Render them on two staggered inner rings so the front and rear DF circles stay visible.
+    positions[f"{exchange_node_id}:union0"] = _project(-0.28, 1.08)
+    positions[f"{exchange_node_id}:union1"] = _project(0.28, 1.86)
+    return positions
+
+
 def _exchange_grid_positions_2d(rows: int, cols: int) -> dict[str, tuple[float, float]]:
     positions: dict[str, tuple[float, float]] = {}
     cell_x = 7.2
@@ -114,17 +148,37 @@ def _exchange_grid_positions_2d(rows: int, cols: int) -> dict[str, tuple[float, 
     return positions
 
 
-def _exchange_grid_positions_2d_torus(rows: int, cols: int) -> dict[str, tuple[float, float]]:
+def _torus_exchange_coords(
+    g: nx.Graph,
+) -> dict[str, tuple[int, ...]]:
+    coords: dict[str, tuple[int, ...]] = {}
+    for node_id, data in g.nodes(data=True):
+        if data.get("node_role") != "union":
+            continue
+        exchange_id = data.get("exchange_node_id")
+        coord = data.get("exchange_grid_coord")
+        if exchange_id is None or coord is None:
+            continue
+        coords[str(exchange_id)] = tuple(int(value) for value in coord)
+    return coords
+
+
+def _exchange_grid_positions_2d_torus(g: nx.Graph) -> dict[str, tuple[float, float]]:
     positions: dict[str, tuple[float, float]] = {}
+    exchange_coords = _torus_exchange_coords(g)
+    if not exchange_coords:
+        exchange_coords = {
+            f"en{row * 4 + col}": (row, col)
+            for row in range(4)
+            for col in range(4)
+        }
     cell_x = 7.2
     cell_y = 3.8
 
-    for row in range(rows):
-        for col in range(cols):
-            exchange_id = f"en{row * cols + col}"
-            base_x = col * cell_x
-            base_y = -row * cell_y
-            positions.update(_torus_exchange_local_positions(base_x, base_y, exchange_id))
+    for exchange_id, (row, col) in sorted(exchange_coords.items(), key=lambda item: int(item[0].removeprefix("en"))):
+        base_x = col * cell_x
+        base_y = -row * cell_y
+        positions.update(_torus_exchange_local_positions(base_x, base_y, exchange_id))
 
     return positions
 
@@ -151,24 +205,33 @@ def _exchange_grid_positions_3d() -> dict[str, tuple[float, float]]:
     return positions
 
 
-def _exchange_grid_positions_3d_torus() -> dict[str, tuple[float, float]]:
+def _exchange_grid_positions_3d_torus(g: nx.Graph) -> dict[str, tuple[float, float]]:
     positions: dict[str, tuple[float, float]] = {}
+    exchange_coords = _torus_exchange_coords(g)
+    if not exchange_coords:
+        exchange_coords = {
+            f"en{(x * 16) + (y * 4) + z}": (x, y, z)
+            for x in range(4)
+            for y in range(4)
+            for z in range(4)
+        }
     cell_x = 6.6
     cell_y = 3.7
     block_gap_x = 31.0
     block_gap_y = 18.0
-    size = 4
 
-    for x in range(size):
-        for y in range(size):
-            for z in range(size):
-                exchange_index = (x * size * size) + (y * size) + z
-                exchange_id = f"en{exchange_index}"
-                block_col = z % 2
-                block_row = z // 2
-                base_x = (block_col * block_gap_x) + (y * cell_x)
-                base_y = -(block_row * block_gap_y) - (x * cell_y)
-                positions.update(_torus_exchange_local_positions(base_x, base_y, exchange_id))
+    z_levels = sorted({coord[2] for coord in exchange_coords.values()})
+    z_index_map = {z_level: index for index, z_level in enumerate(z_levels)}
+    blocks_per_row = 2 if len(z_levels) > 1 else 1
+
+    for exchange_id, coord in sorted(exchange_coords.items(), key=lambda item: int(item[0].removeprefix("en"))):
+        x, y, z = coord
+        z_index = z_index_map[z]
+        block_col = z_index % blocks_per_row
+        block_row = z_index // blocks_per_row
+        base_x = (block_col * block_gap_x) + (y * cell_x)
+        base_y = -(block_row * block_gap_y) - (x * cell_y)
+        positions.update(_torus_exchange_local_positions(base_x, base_y, exchange_id))
 
     return positions
 
@@ -214,17 +277,19 @@ def _exchange_grid_positions_clos(g: nx.Graph) -> dict[str, tuple[float, float]]
 
 def _exchange_grid_positions_df(g: nx.Graph) -> dict[str, tuple[float, float]]:
     positions: dict[str, tuple[float, float]] = {}
-    exchanges_by_server: dict[int, list[str]] = {}
+    exchanges_by_server: dict[int, list[tuple[int, str]]] = {}
     for node_id, data in g.nodes(data=True):
         if data.get("node_role") != "union":
             continue
         exchange_id = data.get("exchange_node_id")
         server_id = data.get("server_id")
-        if exchange_id is None or server_id is None:
+        group_local_index = data.get("df_group_local_index")
+        if exchange_id is None or server_id is None or group_local_index is None:
             continue
-        exchanges_by_server.setdefault(int(server_id), [])
-        if str(exchange_id) not in exchanges_by_server[int(server_id)]:
-            exchanges_by_server[int(server_id)].append(str(exchange_id))
+        server_exchanges = exchanges_by_server.setdefault(int(server_id), [])
+        exchange_pair = (int(group_local_index), str(exchange_id))
+        if exchange_pair not in server_exchanges:
+            server_exchanges.append(exchange_pair)
 
     ordered_servers = sorted(exchanges_by_server)
     if not ordered_servers:
@@ -233,22 +298,20 @@ def _exchange_grid_positions_df(g: nx.Graph) -> dict[str, tuple[float, float]]:
     exchange_sequence: list[str] = []
     group_breaks: list[int] = []
     for server_id in ordered_servers:
-        ordered_exchanges = sorted(
-            exchanges_by_server[server_id],
-            key=lambda value: int(value.removeprefix("en")),
-        )
-        ordered_exchanges.reverse()
+        ordered_exchanges = [
+            exchange_id
+            for _, exchange_id in sorted(
+                exchanges_by_server[server_id],
+                key=lambda item: item[0],
+                reverse=True,
+            )
+        ]
         exchange_sequence.extend(ordered_exchanges)
         group_breaks.append(len(exchange_sequence))
 
-    if not exchange_sequence:
-        return positions
-
-    server_gap_units = 1.2
+    server_gap_units = 1.24
     slot_count = len(exchange_sequence) + (len(ordered_servers) * server_gap_units)
-    # Give each DF exchange-node block more breathing room on the ring so the
-    # SSU and Union markers do not crowd together when rendered in the HTML dashboard.
-    radius = max(36.0, slot_count * 1.38)
+    radius = max(42.0, slot_count * 1.48)
 
     slot_cursor = 0.0
     for exchange_index, exchange_id in enumerate(exchange_sequence):
@@ -259,13 +322,12 @@ def _exchange_grid_positions_df(g: nx.Graph) -> dict[str, tuple[float, float]]:
         center_x = radius * radial[0]
         center_y = radius * radial[1]
         positions.update(
-            _oriented_exchange_local_positions(
+            _oriented_df_exchange_local_positions(
                 center_x=center_x,
                 center_y=center_y,
                 exchange_node_id=exchange_id,
                 tangent=tangent,
                 inward=inward,
-                reverse_union_order=False,
             )
         )
 
@@ -280,12 +342,12 @@ def _explicit_positions(topology_name: str, g: nx.Graph) -> dict[Any, tuple[floa
     if topology_name == "2D-FullMesh":
         return _exchange_grid_positions_2d(4, 4)
     if topology_name == "2D-Torus":
-        return _exchange_grid_positions_2d_torus(4, 4)
+        return _exchange_grid_positions_2d_torus(g)
     if topology_name == "3D-Torus":
-        return _exchange_grid_positions_3d_torus()
+        return _exchange_grid_positions_3d_torus(g)
     if topology_name == "Clos":
         return _exchange_grid_positions_clos(g)
-    if topology_name == "DF":
+    if _is_df_name(topology_name):
         return _exchange_grid_positions_df(g)
     return None
 
@@ -324,13 +386,56 @@ def _df_union_label(node_data: dict[str, Any]) -> str | None:
     return str(int(local_union_index))
 
 
+def _df_plane_indices(g: nx.Graph) -> list[int]:
+    planes = sorted(
+        {
+            int(data.get("df_plane_index"))
+            for _, data in g.nodes(data=True)
+            if data.get("df_plane_index") is not None
+        }
+    )
+    return planes or [0]
+
+
+def _df_front_plane_index(g: nx.Graph) -> int:
+    return _df_plane_indices(g)[0]
+
+
+def _df_plane_draw_order(g: nx.Graph) -> dict[int, int]:
+    back_to_front = list(reversed(_df_plane_indices(g)))
+    return {plane_index: order for order, plane_index in enumerate(back_to_front)}
+
+
+def _df_node_draw_rank(g: nx.Graph, node_id: str) -> int:
+    plane_index = g.nodes[node_id].get("df_plane_index")
+    if plane_index is None:
+        return len(_df_plane_draw_order(g))
+    return _df_plane_draw_order(g).get(int(plane_index), 0)
+
+
+def _df_plane_node_opacity(g: nx.Graph, node_data: dict[str, Any]) -> float:
+    plane_index = node_data.get("df_plane_index")
+    if plane_index is None:
+        return 1.0
+    draw_order = _df_plane_draw_order(g)
+    plane_count = max(len(draw_order), 1)
+    if plane_count <= 1:
+        return 1.0
+    frontness = draw_order.get(int(plane_index), plane_count - 1) / float(plane_count - 1)
+    return 0.42 + (0.58 * frontness)
+
+
 def _df_server_label_positions(
     g: nx.Graph,
     pos: dict[Any, tuple[float, float]],
+    *,
+    plane_index: int | None = None,
 ) -> tuple[list[float], list[float], list[str]]:
     server_union_points: dict[int, list[tuple[float, float]]] = {}
     for node_id, node_data in g.nodes(data=True):
         if node_data.get("node_role") != "union":
+            continue
+        if plane_index is not None and int(node_data.get("df_plane_index", 0)) != int(plane_index):
             continue
         server_id = node_data.get("server_id")
         if server_id is None:
@@ -378,18 +483,28 @@ def _edge_curve_factor(
         axis_sign = 1.0 if topology_role.endswith("_x") else -1.0
         return 0.18 * plane_sign * axis_sign
 
-    if topology_name == "DF" and topology_role == "df_server_fullmesh":
+    if _is_df_name(topology_name) and topology_role in {"df_server_fullmesh", "df_server_ring"}:
         src_local = int(g.nodes[u].get("server_local_union_index", 0))
         dst_local = int(g.nodes[v].get("server_local_union_index", 0))
         gap = abs(src_local - dst_local)
         parity_sign = -1.0 if ((src_local + dst_local) % 2 == 0) else 1.0
-        return parity_sign * min(0.34, 0.16 + (0.05 * gap))
+        curve = min(0.34, 0.16 + (0.05 * gap))
+        if topology_role == "df_server_ring":
+            curve = min(0.22, 0.10 + (0.03 * gap))
+        return parity_sign * curve
+    if _is_df_name(topology_name) and topology_role == "df_server_bridge":
+        src_local = int(g.nodes[u].get("server_local_union_index", 0))
+        dst_local = int(g.nodes[v].get("server_local_union_index", 0))
+        parity_sign = -1.0 if ((src_local + dst_local) % 2 == 0) else 1.0
+        return 0.12 * parity_sign
 
     if topology_name == "2D-Torus" and topology_role in {"2d_torus_x", "2d_torus_y"}:
         union_plane = int(g.nodes[u].get("local_index", 0))
         plane_sign = -1.0 if union_plane == 0 else 1.0
         axis_curve = 0.12 if topology_role.endswith("_x") else -0.12
         return plane_sign * axis_curve
+    if topology_name == "2D-Torus" and topology_role == "2d_torus_local":
+        return 0.14
 
     if topology_name == "3D-Torus" and topology_role in {"3d_torus_x", "3d_torus_y", "3d_torus_z"}:
         union_plane = int(g.nodes[u].get("local_index", 0))
@@ -400,6 +515,8 @@ def _edge_curve_factor(
             "3d_torus_z": 0.15,
         }[topology_role]
         return plane_sign * axis_curve
+    if topology_name == "3D-Torus" and topology_role == "3d_torus_local":
+        return 0.12
 
     return 0.0
 
@@ -458,6 +575,14 @@ def _path_midpoint(points: list[tuple[float, float]]) -> tuple[float, float]:
     return points[midpoint_index]
 
 
+def _edge_draw_rank(g: nx.Graph, topology_name: str, u: str, v: str) -> int:
+    if not _is_df_name(topology_name):
+        return 0
+    draw_order = _df_plane_draw_order(g)
+    plane_index = g.nodes[u].get("df_plane_index", g.nodes[v].get("df_plane_index", 0))
+    return draw_order.get(int(plane_index), 0)
+
+
 def _trace_from_edges(
     g: nx.Graph,
     pos: dict[Any, tuple[float, float]],
@@ -470,11 +595,15 @@ def _trace_from_edges(
 ) -> go.Scatter:
     edge_x: list[float] = []
     edge_y: list[float] = []
+    segments: list[tuple[int, list[tuple[float, float]]]] = []
 
     for u, v, data in g.edges(data=True):
         if data.get("link_kind") != link_kind:
             continue
         points = _edge_path_points(g, pos, topology_name, str(u), str(v), data)
+        segments.append((_edge_draw_rank(g, topology_name, str(u), str(v)), points))
+
+    for _, points in sorted(segments, key=lambda item: item[0]):
         edge_x.extend([point[0] for point in points] + [None])
         edge_y.extend([point[1] for point in points] + [None])
 
@@ -493,6 +622,8 @@ def _build_interaction_payload(
     g: nx.Graph,
     pos: dict[Any, tuple[float, float]],
     node_ids: list[str],
+    *,
+    base_node_opacities: list[float] | None = None,
 ) -> dict[str, Any]:
     topology_name = str(g.graph.get("topology_name", ""))
     node_points: dict[str, Any] = {}
@@ -548,19 +679,20 @@ def _build_interaction_payload(
         "neighbors": neighbors,
         "incident_edges": incident_edges,
         "incident_link_labels": incident_link_labels,
+        "base_node_opacities": list(base_node_opacities or ([1.0] * len(node_ids))),
     }
 
 
 def _layout_notes(topology_name: str) -> list[str]:
     base_note = "SSUs stay on the bottom row and Unions sit on the layer above inside each exchange node."
     if topology_name == "3D-Torus":
-        return [base_note, "Exchange nodes are grouped into 4 z-layers, each rendered as one 4x4 plane block."]
+        return [base_note, "Exchange nodes are grouped into paired z-layers, each rendered as one 4x4 plane block."]
     if topology_name == "Clos":
         return [base_note, "Clos spine layer sits above the exchange-node Union layer for structured two-level viewing."]
-    if topology_name == "DF":
+    if _is_df_name(topology_name):
         return [
             base_note,
-            "Exchange nodes are arranged around a circular ring in server order, and each server block participates in one machine-wide Dragon-Fly Union plane.",
+            "Dragon-Fly exchange nodes are rendered as staggered circular plane copies in server order so the front ring and the rear ring stay visually separable.",
         ]
     return [base_note, "Exchange nodes are arranged on a structured horizontal and vertical grid."]
 
@@ -649,7 +781,7 @@ def _interaction_script(plot_id: str, payload: dict[str, Any]) -> str:
     Plotly.restyle(plot, {{opacity: 1}}, [0, 1, 3]);
     Plotly.restyle(plot, {{x: [[]], y: [[]]}}, [2]);
     Plotly.restyle(plot, {{x: [[]], y: [[]], text: [[]], customdata: [[]]}}, [4, 5]);
-    const defaultOpacity = interaction.baseNodeIds.map(() => 1);
+    const defaultOpacity = interaction.base_node_opacities || interaction.baseNodeIds.map(() => 1);
     Plotly.restyle(plot, {{'marker.opacity': [defaultOpacity]}}, [3]);
     plot.dataset.activeNodeId = '';
   }}
@@ -663,7 +795,8 @@ def _interaction_script(plot_id: str, payload: dict[str, Any]) -> str:
 
     Plotly.restyle(plot, {{opacity: 0.14}}, [0, 1]);
     Plotly.restyle(plot, {{opacity: 0.30}}, [3]);
-    const nodeOpacity = interaction.baseNodeIds.map((id) => activeIds.includes(id) ? 1 : 0.12);
+    const baseOpacity = interaction.base_node_opacities || interaction.baseNodeIds.map(() => 1);
+    const nodeOpacity = interaction.baseNodeIds.map((id, index) => activeIds.includes(id) ? 1 : Math.max(0.10, baseOpacity[index] * 0.24));
     Plotly.restyle(plot, {{'marker.opacity': [nodeOpacity]}}, [3]);
     Plotly.restyle(plot, {{x: [flatEdges.x], y: [flatEdges.y]}}, [2]);
     Plotly.restyle(plot, {{
@@ -708,12 +841,13 @@ def _topology_node_traces(
     title: str,
     *,
     idle_ssu_color: str | None = None,
-) -> tuple[go.Scatter, go.Scatter, go.Scatter, list[str]]:
+) -> tuple[go.Scatter, go.Scatter, go.Scatter, list[str], list[float]]:
     node_ids = [str(node_id) for node_id in g.nodes()]
     node_x: list[float] = []
     node_y: list[float] = []
     node_color: list[str] = []
     node_size: list[int] = []
+    node_opacity: list[float] = []
     node_text: list[str] = []
     union_label_x: list[float] = []
     union_label_y: list[float] = []
@@ -721,7 +855,17 @@ def _topology_node_traces(
     server_label_x: list[float] = []
     server_label_y: list[float] = []
     server_label_text: list[str] = []
-    show_df_union_labels = title == "DF"
+    show_df_union_labels = _is_df_name(title)
+    front_plane_index = _df_front_plane_index(g) if show_df_union_labels else None
+
+    if show_df_union_labels:
+        node_ids.sort(
+            key=lambda node_id: (
+                _df_node_draw_rank(g, node_id),
+                0 if g.nodes[node_id].get("node_role") == "ssu" else 1,
+                str(node_id),
+            )
+        )
 
     for node_id in node_ids:
         node_data = g.nodes[node_id]
@@ -733,6 +877,7 @@ def _topology_node_traces(
         else:
             node_color.append(_node_color(node_data))
         node_size.append(11 if node_data.get("node_role") == "ssu" else 14)
+        node_opacity.append(_df_plane_node_opacity(g, node_data) if show_df_union_labels else 1.0)
         node_text.append(
             "<br>".join(
                 [
@@ -742,7 +887,11 @@ def _topology_node_traces(
                 ]
             )
         )
-        if show_df_union_labels and node_data.get("node_role") == "union":
+        if (
+            show_df_union_labels
+            and node_data.get("node_role") == "union"
+            and int(node_data.get("df_plane_index", 0)) == int(front_plane_index)
+        ):
             label = _df_union_label(node_data)
             if label is not None:
                 union_label_x.append(x)
@@ -750,13 +899,22 @@ def _topology_node_traces(
                 union_label_text.append(label)
 
     if show_df_union_labels:
-        server_label_x, server_label_y, server_label_text = _df_server_label_positions(g, pos)
+        server_label_x, server_label_y, server_label_text = _df_server_label_positions(
+            g,
+            pos,
+            plane_index=front_plane_index,
+        )
 
     base_nodes = go.Scatter(
         x=node_x,
         y=node_y,
         mode="markers",
-        marker=dict(size=node_size, color=node_color, line=dict(width=1, color="#232b34"), opacity=1),
+        marker=dict(
+            size=node_size,
+            color=node_color,
+            line=dict(width=1, color="#232b34"),
+            opacity=node_opacity,
+        ),
         hovertemplate="%{text}<extra></extra>",
         text=node_text,
         customdata=node_ids,
@@ -785,7 +943,7 @@ def _topology_node_traces(
         showlegend=False,
         name="server-labels",
     )
-    return base_nodes, union_labels, server_labels, node_ids
+    return base_nodes, union_labels, server_labels, node_ids, node_opacity
 
 
 def _hardware_legend_traces(g: nx.Graph) -> list[go.Scatter]:
@@ -925,6 +1083,20 @@ def _rgb_to_rgba(rgb: tuple[float, float, float], alpha: float) -> str:
     return f"rgba({red}, {green}, {blue}, {alpha:.3f})"
 
 
+def _scale_rgba_alpha(color: str, factor: float) -> str:
+    prefix = "rgba("
+    if not color.startswith(prefix) or not color.endswith(")"):
+        return color
+    parts = [part.strip() for part in color[len(prefix):-1].split(",")]
+    if len(parts) != 4:
+        return color
+    try:
+        alpha = max(0.0, min(1.0, float(parts[3]) * factor))
+    except ValueError:
+        return color
+    return f"rgba({parts[0]}, {parts[1]}, {parts[2]}, {alpha:.3f})"
+
+
 def _traffic_rate_color(total_rate_gbps: float, max_rate_gbps: float) -> str:
     if max_rate_gbps <= 0.0 or total_rate_gbps <= 0.0:
         return "rgba(66, 74, 92, 0.28)"
@@ -958,6 +1130,8 @@ def _traffic_edge_traces(
     completion_time_s: float,
 ) -> list[go.Scatter]:
     edge_payloads: list[dict[str, Any]] = []
+    plane_draw_order = _df_plane_draw_order(g) if _is_df_name(topology_name) else {}
+    plane_count = max(len(plane_draw_order), 1)
 
     for left, right in g.edges():
         left = str(left)
@@ -971,6 +1145,13 @@ def _traffic_edge_traces(
         reverse_rate_gbps = (reverse_bits / completion_time_s / 1e9) if completion_time_s > 0 else 0.0
         forward_utilization = (forward_rate_gbps / bandwidth_gbps) if bandwidth_gbps > 0 else 0.0
         reverse_utilization = (reverse_rate_gbps / bandwidth_gbps) if bandwidth_gbps > 0 else 0.0
+        plane_index = int(g.nodes[left].get("df_plane_index", g.nodes[right].get("df_plane_index", 0)))
+        draw_rank = plane_draw_order.get(plane_index, 0)
+        if plane_count <= 1:
+            plane_opacity = 1.0
+        else:
+            frontness = draw_rank / float(plane_count - 1)
+            plane_opacity = 0.42 + (0.58 * frontness)
         edge_payloads.append(
             {
                 "left": left,
@@ -986,9 +1167,12 @@ def _traffic_edge_traces(
                 "reverse_volume_gb": reverse_bits / 8e9,
                 "total_rate_gbps": forward_rate_gbps + reverse_rate_gbps,
                 "line_width": 2.6 if edge_data.get("link_kind") == "backend_interconnect" else 2.1,
+                "draw_rank": draw_rank,
+                "plane_opacity": plane_opacity,
             }
         )
 
+    edge_payloads.sort(key=lambda payload: payload["draw_rank"])
     max_total_rate_gbps = max(
         (payload["total_rate_gbps"] for payload in edge_payloads),
         default=0.0,
@@ -1019,7 +1203,10 @@ def _traffic_edge_traces(
             payload["reverse_volume_gb"],
             payload["total_rate_gbps"],
         ]
-        visible_color = _traffic_rate_color(payload["total_rate_gbps"], max_total_rate_gbps)
+        visible_color = _scale_rgba_alpha(
+            _traffic_rate_color(payload["total_rate_gbps"], max_total_rate_gbps),
+            payload["plane_opacity"],
+        )
         traces.append(
             go.Scatter(
                 x=payload["x"],
@@ -1101,7 +1288,11 @@ def create_topology_figure(
         showlegend=False,
         name="highlight-edge-labels",
     )
-    base_nodes, union_labels, server_labels, node_ids = _topology_node_traces(g, pos, topology_name)
+    base_nodes, union_labels, server_labels, node_ids, node_opacity = _topology_node_traces(
+        g,
+        pos,
+        topology_name,
+    )
     hardware_legend = _hardware_legend_traces(g)
     highlight_nodes = go.Scatter(
         x=[],
@@ -1138,7 +1329,12 @@ def create_topology_figure(
         legend_position="right",
     )
 
-    interaction = _build_interaction_payload(g, pos, node_ids)
+    interaction = _build_interaction_payload(
+        g,
+        pos,
+        node_ids,
+        base_node_opacities=node_opacity,
+    )
     interaction["baseNodeIds"] = node_ids
     plot_id = f"plot-{topology_name.lower().replace(' ', '-').replace('_', '-')}"
     return fig, interaction, plot_id
@@ -1160,8 +1356,8 @@ def create_traffic_figure(
         traffic_details.get("edge_load_bits", {}),
         float(workload_metrics.get("completion_time_s", 0.0)),
     )
-    if workload_name == "Sparse 1-to-N":
-        base_nodes, union_labels, server_labels, _ = _topology_node_traces(
+    if workload_name != "A2A":
+        base_nodes, union_labels, server_labels, _, _ = _topology_node_traces(
             g,
             pos,
             topology_name,
@@ -1169,7 +1365,7 @@ def create_traffic_figure(
         )
         focus_traces = _sparse_focus_traces(g, pos, traffic_details)
     else:
-        base_nodes, union_labels, server_labels, _ = _topology_node_traces(g, pos, topology_name)
+        base_nodes, union_labels, server_labels, _, _ = _topology_node_traces(g, pos, topology_name)
         focus_traces = []
 
     subtitle = (
@@ -1191,7 +1387,7 @@ def create_traffic_figure(
         f"{display_workload_name(workload_name)} Directional Traffic",
         subtitle,
         height=560,
-        legend_position="inside_top_right" if workload_name == "Sparse 1-to-N" else "top",
+        legend_position="inside_top_right" if workload_name != "A2A" else "top",
         show_heading=False,
     )
     plot_id = (
@@ -1320,7 +1516,7 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
             layout_seed=item["layout_seed"],
         )
         traffic_plots = []
-        for workload_name in ("A2A", "Sparse 1-to-N"):
+        for workload_name in item.get("traffic_workload_names", ("A2A", "Sparse 1-to-N")):
             traffic_fig, traffic_plot_id = create_traffic_figure(
                 g=item["graph"],
                 topology_name=item["name"],
@@ -1365,6 +1561,7 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
                 "routing_mode_descriptions": item.get("routing_mode_descriptions", []),
                 "structural_metrics": item["structural_metrics"],
                 "communication_metrics": item["communication_metrics"],
+                "workload_metric_rows": item.get("workload_metric_rows", []),
                 "default_routing_highlight": item.get("default_routing_highlight"),
                 "routing_comparison": item.get("routing_comparison"),
                 "observations": item["observations"],

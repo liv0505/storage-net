@@ -1,0 +1,4 @@
+src,dst,gb
+en0:ssu0,en5:ssu0,4
+en0:ssu1,en5:ssu1,2
+en2:ssu3,en7:ssu2,1.5

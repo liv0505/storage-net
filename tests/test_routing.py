@@ -28,7 +28,7 @@ def _backend_roles_for_path(g, path_nodes: tuple[str, ...]) -> list[str]:
     return roles
 
 
-def test_dor_returns_two_plane_paths_for_2d_torus():
+def test_dor_returns_two_min_hop_paths_for_single_plane_2d_torus():
     g = build_topology("2D-Torus", AnalysisConfig())
     paths = compute_paths(g, "en0:ssu0", "en5:ssu0", routing_mode="DOR", cfg=AnalysisConfig())
 
@@ -37,13 +37,14 @@ def test_dor_returns_two_plane_paths_for_2d_torus():
     assert {path.nodes[-2] for path in paths} == {"en5:union0", "en5:union1"}
     assert {round(path.weight, 8) for path in paths} == {0.5}
     assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
+    assert {path.hops for path in paths} == {5}
     for path in paths:
         assert path.nodes[0] == "en0:ssu0"
         assert path.nodes[-1] == "en5:ssu0"
-        assert _backend_roles_for_path(g, path.nodes) == ["2d_torus_x", "2d_torus_y"]
+        assert _backend_roles_for_path(g, path.nodes) == ["2d_torus_x", "2d_torus_y", "2d_torus_y"]
 
 
-def test_shortest_path_routing_splits_across_shortest_paths_in_both_planes():
+def test_single_plane_2d_torus_shortest_path_splits_across_all_min_hop_choices():
     g = build_topology("2D-Torus", AnalysisConfig())
     paths = compute_paths(
         g,
@@ -53,11 +54,11 @@ def test_shortest_path_routing_splits_across_shortest_paths_in_both_planes():
         cfg=AnalysisConfig(),
     )
 
-    assert len(paths) == 4
+    assert len(paths) == 12
     assert {path.nodes[1] for path in paths} == {"en0:union0", "en0:union1"}
     assert {path.nodes[-2] for path in paths} == {"en5:union0", "en5:union1"}
-    assert {path.hops for path in paths} == {4}
-    assert {round(path.weight, 8) for path in paths} == {0.25}
+    assert {path.hops for path in paths} == {5}
+    assert {round(path.weight, 8) for path in paths} == {round(1.0 / 12.0, 8)}
     assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
 
 
@@ -113,16 +114,17 @@ def test_2d_torus_shortest_path_differs_from_dor():
 
     assert len(dor_paths) == 2
     assert {tuple(_backend_roles_for_path(g, path.nodes)) for path in dor_paths} == {
-        ("2d_torus_x", "2d_torus_y"),
+        ("2d_torus_x", "2d_torus_y", "2d_torus_y"),
     }
     assert {round(path.weight, 8) for path in dor_paths} == {0.5}
 
-    assert len(shortest_paths) == 4
+    assert len(shortest_paths) == 12
     assert {tuple(_backend_roles_for_path(g, path.nodes)) for path in shortest_paths} == {
-        ("2d_torus_x", "2d_torus_y"),
-        ("2d_torus_y", "2d_torus_x"),
+        ("2d_torus_x", "2d_torus_y", "2d_torus_y"),
+        ("2d_torus_y", "2d_torus_x", "2d_torus_y"),
+        ("2d_torus_y", "2d_torus_y", "2d_torus_x"),
     }
-    assert {round(path.weight, 8) for path in shortest_paths} == {0.25}
+    assert {round(path.weight, 8) for path in shortest_paths} == {round(1.0 / 12.0, 8)}
 
 
 def test_3d_torus_shortest_path_differs_from_dor():
@@ -145,15 +147,15 @@ def test_3d_torus_shortest_path_differs_from_dor():
 
     assert len(dor_paths) == 2
     assert {tuple(_backend_roles_for_path(g, path.nodes)) for path in dor_paths} == {
-        ("3d_torus_x", "3d_torus_y", "3d_torus_z"),
+        ("3d_torus_x", "3d_torus_x", "3d_torus_y", "3d_torus_y", "3d_torus_z"),
     }
     assert {round(path.weight, 8) for path in dor_paths} == {0.5}
 
-    assert len(shortest_paths) == 12
+    assert len(shortest_paths) == 240
     assert {tuple(sorted(_backend_roles_for_path(g, path.nodes))) for path in shortest_paths} == {
-        ("3d_torus_x", "3d_torus_y", "3d_torus_z"),
+        ("3d_torus_x", "3d_torus_x", "3d_torus_y", "3d_torus_y", "3d_torus_z"),
     }
-    assert {round(path.weight, 8) for path in shortest_paths} == {round(1.0 / 12.0, 8)}
+    assert {round(path.weight, 8) for path in shortest_paths} == {round(1.0 / 240.0, 8)}
 
 
 def test_full_path_uses_all_available_egress_ports_across_both_planes():
@@ -207,9 +209,9 @@ def test_df_same_server_different_exchange_uses_server_local_fullmesh_only():
         cfg=AnalysisConfig(),
     )
 
-    assert len(paths) == 4
+    assert len(paths) == 2
     assert {path.hops for path in paths} == {3}
-    assert {round(path.weight, 8) for path in paths} == {0.25}
+    assert {round(path.weight, 8) for path in paths} == {0.5}
     assert {
         tuple(_backend_roles_for_path(g, path.nodes))
         for path in paths
@@ -221,18 +223,107 @@ def test_df_cross_server_routing_uses_one_unique_inter_server_link_with_local_sp
     paths = compute_paths(
         g,
         "en1:ssu0",
-        "en2:ssu0",
+        "en4:ssu0",
         routing_mode="DOR",
         cfg=AnalysisConfig(),
     )
 
-    assert len(paths) == 4
-    assert {round(path.weight, 8) for path in paths} == {0.25}
+    assert len(paths) == 2
+    assert {round(path.weight, 8) for path in paths} == {0.5}
     assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
     assert {
         tuple(_backend_roles_for_path(g, path.nodes))
         for path in paths
     } == {("df_server_fullmesh", "df_inter_server", "df_server_fullmesh")}
+
+
+def test_df_shuffled_cross_server_routing_keeps_one_inter_server_backend_edge():
+    g = build_topology("DF-Shuffled", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en1:ssu0",
+        "en4:ssu0",
+        routing_mode="SHORTEST_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    assert paths
+    assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
+    for path in paths:
+        roles = _backend_roles_for_path(g, path.nodes)
+        assert roles.count("df_inter_server") == 1
+        assert set(roles) <= {"df_server_fullmesh", "df_inter_server"}
+
+
+def test_df_scaleup_same_server_paths_follow_ring_shortest_choices():
+    g = build_topology("DF-ScaleUp", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en0:ssu0",
+        "en1:ssu0",
+        routing_mode="SHORTEST_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    assert len(paths) == 2
+    assert {path.hops for path in paths} == {3}
+    assert {round(path.weight, 8) for path in paths} == {0.5}
+    assert {
+        tuple(_backend_roles_for_path(g, path.nodes))
+        for path in paths
+    } == {("df_server_ring",)}
+
+
+def test_df_2p_double_4global_same_server_cross_unit_traffic_detours_via_global_plane():
+    g = build_topology("DF-2P-Double-4Global", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en0:ssu0",
+        "en2:ssu0",
+        routing_mode="SHORTEST_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    assert paths
+    assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
+    for path in paths:
+        roles = _backend_roles_for_path(g, path.nodes)
+        assert roles.count("df_inter_server") >= 2
+
+
+def test_df_2p_triple_3global_same_server_cross_unit_traffic_detours_via_global_plane():
+    g = build_topology("DF-2P-Triple-3Global", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en0:ssu0",
+        "en2:ssu0",
+        routing_mode="SHORTEST_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    assert paths
+    assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
+    for path in paths:
+        roles = _backend_roles_for_path(g, path.nodes)
+        assert roles.count("df_inter_server") >= 2
+
+
+def test_df_2p_double_bridge_3global_same_server_cross_unit_traffic_stays_local():
+    g = build_topology("DF-2P-Double-Bridge-3Global", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en0:ssu0",
+        "en2:ssu0",
+        routing_mode="SHORTEST_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    assert len(paths) == 2
+    assert {round(path.weight, 8) for path in paths} == {0.5}
+    assert {
+        tuple(_backend_roles_for_path(g, path.nodes))
+        for path in paths
+    } == {("df_server_bridge",)}
 
 
 @pytest.mark.parametrize(

@@ -22,8 +22,24 @@ def test_structural_metrics_use_backend_only_balanced_bisection_bandwidth():
     g = build_topology("2D-Torus", AnalysisConfig())
     metrics = compute_structural_metrics(g)
 
-    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(6400.0)
-    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(50.0)
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(3200.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(100.0)
+
+
+def test_2d_fullmesh_bisection_matches_two_plane_cut_formula():
+    g = build_topology("2D-FullMesh", AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(12800.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(200.0)
+
+
+def test_3d_torus_bisection_matches_surface_cut_formula():
+    g = build_topology("3D-Torus", AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(12800.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(100.0)
 
 
 def test_bisection_bandwidth_ignores_internal_ssu_uplinks_when_backend_is_removed():
@@ -122,12 +138,48 @@ def test_workload_details_keep_opposite_directions_separate():
     assert edge_load_bits[("en1:union0", "en0:union0")] > 0
 
 
+def test_hop_volume_distribution_weights_buckets_by_offered_volume():
+    cfg = AnalysisConfig(message_size_mb=1.0)
+    g = build_topology("2D-FullMesh", cfg)
+    same_exchange_bits = _message_bits(cfg)
+    remote_bits = same_exchange_bits * 3
+    demands = [
+        FlowDemand(src="en0:ssu0", dst="en0:ssu1", bits=same_exchange_bits),
+        FlowDemand(src="en0:ssu0", dst="en1:ssu0", bits=remote_bits),
+    ]
+
+    details = evaluate_workload_with_details(g, demands, routing_mode="DOR", cfg=cfg)
+    by_hop = {
+        row["hop_count"]: row for row in details["hop_volume_distribution"]
+    }
+
+    assert by_hop[2]["offered_volume_gb"] == pytest.approx(same_exchange_bits / 8e9)
+    assert by_hop[2]["offered_volume_pct"] == pytest.approx(25.0)
+    assert by_hop[3]["offered_volume_gb"] == pytest.approx(remote_bits / 8e9)
+    assert by_hop[3]["offered_volume_pct"] == pytest.approx(75.0)
+
+
+def test_link_volume_distribution_groups_directional_offered_volume():
+    cfg = AnalysisConfig(message_size_mb=1.0)
+    g = build_topology("2D-FullMesh", cfg)
+    demands = [FlowDemand(src="en0:ssu0", dst="en0:ssu1", bits=_message_bits(cfg))]
+
+    details = evaluate_workload_with_details(g, demands, routing_mode="MIN_HOPS", cfg=cfg)
+    distribution = details["link_volume_distribution"]
+
+    assert len(distribution) == 1
+    row = distribution[0]
+    assert row["offered_volume_gb"] == pytest.approx(_message_bits(cfg) / 8e9)
+    assert row["link_count"] == 2
+    assert row["link_ratio_pct"] == pytest.approx(100.0)
+
+
 def test_df_structural_metrics_complete_with_server_aware_bisection_candidates():
     g = build_topology("DF", AnalysisConfig())
     metrics = compute_structural_metrics(g)
 
-    assert metrics["bisection_bandwidth_gbps"] > 0
-    assert metrics["bisection_bandwidth_gbps_per_ssu"] > 0
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(33600.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(33600.0 / 208.0)
 
 
 @pytest.mark.parametrize("routing_mode", ["DOR", "FULL_PATH"])

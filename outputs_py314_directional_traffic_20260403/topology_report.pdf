@@ -132,7 +132,7 @@ endobj
 endobj
 16 0 obj
 <<
-/Author (\(anonymous\)) /CreationDate (D:20260403175350+08'00') /Creator (\(unspecified\)) /Keywords () /ModDate (D:20260403175350+08'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+/Author (\(anonymous\)) /CreationDate (D:20260407154554+08'00') /Creator (\(unspecified\)) /Keywords () /ModDate (D:20260407154554+08'00') /Producer (ReportLab PDF Library - \(opensource\)) 
   /Subject (\(unspecified\)) /Title (\(anonymous\)) /Trapped /False
 >>
 endobj
@@ -165,7 +165,7 @@ q
 1 0 0 1 48.51969 749.3701 cm
 q
 .584314 .639216 .721569 rg
-BT 1 0 0 1 0 2.5 Tm /F1 9.5 Tf 12 TL (Generated at: 2026-04-03 17:53:50) Tj T* ET
+BT 1 0 0 1 0 2.5 Tm /F1 9.5 Tf 12 TL (Generated at: 2026-04-07 15:45:54) Tj T* ET
 Q
 Q
 q
@@ -757,7 +757,7 @@ BT 1 0 0 1 142.063 9.4 Tm (0.0213 s) Tj T* ET
 BT 1 0 0 1 201.5906 9.4 Tm (0.0107 s) Tj T* ET
 BT 1 0 0 1 261.1181 9.4 Tm (4.39) Tj T* ET
 BT 1 0 0 1 312.1417 9.4 Tm (100.00%) Tj T* ET
-BT 1 0 0 1 380.1732 9.4 Tm (0.166) Tj T* ET
+BT 1 0 0 1 380.1732 9.4 Tm (0.167) Tj T* ET
 q
 1 J
 1 j
@@ -834,8 +834,8 @@ BT 1 0 0 1 71.19685 9.4 Tm (200.00 Gbps) Tj T* ET
 BT 1 0 0 1 142.063 9.4 Tm (0.0003 s) Tj T* ET
 BT 1 0 0 1 201.5906 9.4 Tm (0.0002 s) Tj T* ET
 BT 1 0 0 1 261.1181 9.4 Tm (4.35) Tj T* ET
-BT 1 0 0 1 312.1417 9.4 Tm (47.92%) Tj T* ET
-BT 1 0 0 1 380.1732 9.4 Tm (0.460) Tj T* ET
+BT 1 0 0 1 312.1417 9.4 Tm (50.00%) Tj T* ET
+BT 1 0 0 1 380.1732 9.4 Tm (0.468) Tj T* ET
 q
 1 J
 1 j
@@ -1403,12 +1403,12 @@ BT 1 0 0 1 261.1181 32.4 Tm (4.02) Tj T* ET
 BT 1 0 0 1 312.1417 32.4 Tm (100.00%) Tj T* ET
 BT 1 0 0 1 380.1732 32.4 Tm (0.000) Tj T* ET
 BT 1 0 0 1 6 9.4 Tm (FULL_PATH) Tj T* ET
-BT 1 0 0 1 71.19685 9.4 Tm (71.35 Gbps) Tj T* ET
-BT 1 0 0 1 142.063 9.4 Tm (0.0570 s) Tj T* ET
+BT 1 0 0 1 71.19685 9.4 Tm (64.80 Gbps) Tj T* ET
+BT 1 0 0 1 142.063 9.4 Tm (0.0627 s) Tj T* ET
 BT 1 0 0 1 201.5906 9.4 Tm (0.0107 s) Tj T* ET
 BT 1 0 0 1 261.1181 9.4 Tm (4.90) Tj T* ET
 BT 1 0 0 1 312.1417 9.4 Tm (100.00%) Tj T* ET
-BT 1 0 0 1 380.1732 9.4 Tm (0.295) Tj T* ET
+BT 1 0 0 1 380.1732 9.4 Tm (0.328) Tj T* ET
 q
 1 J
 1 j
@@ -1475,12 +1475,12 @@ BT 1 0 0 1 261.1181 32.4 Tm (4.08) Tj T* ET
 BT 1 0 0 1 312.1417 32.4 Tm (64.58%) Tj T* ET
 BT 1 0 0 1 380.1732 32.4 Tm (0.537) Tj T* ET
 BT 1 0 0 1 6 9.4 Tm (FULL_PATH) Tj T* ET
-BT 1 0 0 1 71.19685 9.4 Tm (188.24 Gbps) Tj T* ET
-BT 1 0 0 1 142.063 9.4 Tm (0.0003 s) Tj T* ET
+BT 1 0 0 1 71.19685 9.4 Tm (168.42 Gbps) Tj T* ET
+BT 1 0 0 1 142.063 9.4 Tm (0.0004 s) Tj T* ET
 BT 1 0 0 1 201.5906 9.4 Tm (0.0002 s) Tj T* ET
 BT 1 0 0 1 261.1181 9.4 Tm (4.88) Tj T* ET
 BT 1 0 0 1 312.1417 9.4 Tm (100.00%) Tj T* ET
-BT 1 0 0 1 380.1732 9.4 Tm (0.490) Tj T* ET
+BT 1 0 0 1 380.1732 9.4 Tm (0.517) Tj T* ET
 q
 1 J
 1 j
@@ -2023,12 +2023,12 @@ BT 1 0 0 1 261.1181 32.4 Tm (5.01) Tj T* ET
 BT 1 0 0 1 312.1417 32.4 Tm (100.00%) Tj T* ET
 BT 1 0 0 1 380.1732 32.4 Tm (0.000) Tj T* ET
 BT 1 0 0 1 6 9.4 Tm (FULL_PATH) Tj T* ET
-BT 1 0 0 1 71.19685 9.4 Tm (51.31 Gbps) Tj T* ET
-BT 1 0 0 1 142.063 9.4 Tm (0.3187 s) Tj T* ET
+BT 1 0 0 1 71.19685 9.4 Tm (40.09 Gbps) Tj T* ET
+BT 1 0 0 1 142.063 9.4 Tm (0.4079 s) Tj T* ET
 BT 1 0 0 1 201.5906 9.4 Tm (0.0414 s) Tj T* ET
 BT 1 0 0 1 261.1181 9.4 Tm (5.98) Tj T* ET
 BT 1 0 0 1 312.1417 9.4 Tm (100.00%) Tj T* ET
-BT 1 0 0 1 380.1732 9.4 Tm (0.530) Tj T* ET
+BT 1 0 0 1 380.1732 9.4 Tm (0.559) Tj T* ET
 q
 1 J
 1 j
@@ -2095,12 +2095,12 @@ BT 1 0 0 1 261.1181 32.4 Tm (4.92) Tj T* ET
 BT 1 0 0 1 312.1417 32.4 Tm (55.21%) Tj T* ET
 BT 1 0 0 1 380.1732 32.4 Tm (0.389) Tj T* ET
 BT 1 0 0 1 6 9.4 Tm (FULL_PATH) Tj T* ET
-BT 1 0 0 1 71.19685 9.4 Tm (160.00 Gbps) Tj T* ET
-BT 1 0 0 1 142.063 9.4 Tm (0.0004 s) Tj T* ET
+BT 1 0 0 1 71.19685 9.4 Tm (105.49 Gbps) Tj T* ET
+BT 1 0 0 1 142.063 9.4 Tm (0.0006 s) Tj T* ET
 BT 1 0 0 1 201.5906 9.4 Tm (0.0002 s) Tj T* ET
 BT 1 0 0 1 261.1181 9.4 Tm (5.88) Tj T* ET
 BT 1 0 0 1 312.1417 9.4 Tm (100.00%) Tj T* ET
-BT 1 0 0 1 380.1732 9.4 Tm (0.599) Tj T* ET
+BT 1 0 0 1 380.1732 9.4 Tm (0.660) Tj T* ET
 q
 1 J
 1 j
@@ -2733,7 +2733,7 @@ endstream
 endobj
 27 0 obj
 <<
-/Length 6567
+/Length 6583
 >>
 stream
 1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
@@ -2811,7 +2811,7 @@ BT 1 0 0 1 181.748 147.4 Tm (156) Tj T* ET
 BT 1 0 0 1 6 124.4 Tm (Backend Ports Per Union) Tj T* ET
 BT 1 0 0 1 181.748 124.4 Tm (6) Tj T* ET
 BT 1 0 0 1 6 101.4 Tm (Backend Pattern) Tj T* ET
-BT 1 0 0 1 181.748 101.4 Tm (All Unions participate in one direct-DF plane: every server keeps an internal Union full-mesh, and each Union also exposes 3 x 400 Gbps inter-server DF links.) Tj T* ET
+BT 1 0 0 1 181.748 101.4 Tm (All Unions participate in one direct Dragon-Fly plane: every server keeps an internal Union full-mesh, and each Union also exposes 3 x 400 Gbps inter-server Dragon-Fly links.) Tj T* ET
 BT 1 0 0 1 6 78.4 Tm (Server Count) Tj T* ET
 BT 1 0 0 1 181.748 78.4 Tm (13) Tj T* ET
 BT 1 0 0 1 6 55.4 Tm (Exchange Nodes Per Server) Tj T* ET
@@ -2971,7 +2971,7 @@ endstream
 endobj
 28 0 obj
 <<
-/Length 5022
+/Length 5038
 >>
 stream
 1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
@@ -3113,14 +3113,14 @@ q
 1 0 0 1 48.51969 466.3701 cm
 q
 .898039 .933333 .976471 rg
-BT 1 0 0 1 8 4.5 Tm /F1 9.5 Tf 14 TL (- all Union chips across the machine participate in one DF backend plane) Tj T* ET
+BT 1 0 0 1 8 4.5 Tm /F1 9.5 Tf 14 TL (- all Union chips across the machine participate in one Dragon-Fly backend plane) Tj T* ET
 Q
 Q
 q
 1 0 0 1 48.51969 432.3701 cm
 q
 .898039 .933333 .976471 rg
-BT 1 0 0 1 8 18.5 Tm /F1 9.5 Tf 14 TL (- each remote server pair uses one unique inter-server Union-to-Union DF link, while source-side and) Tj T* (destination-side local segments split across shortest in-server choices) Tj T* ET
+BT 1 0 0 1 8 18.5 Tm /F1 9.5 Tf 14 TL (- each remote server pair uses one unique inter-server Union-to-Union Dragon-Fly link, while source-side and) Tj T* (destination-side local segments split across shortest in-server choices) Tj T* ET
 Q
 Q
 q
@@ -3187,11 +3187,11 @@ xref
 0000059406 00000 n 
 0000065669 00000 n 
 0000073651 00000 n 
-0000080270 00000 n 
+0000080286 00000 n 
 trailer
 <<
 /ID 
-[<9ea11a70a0a1ce842e2adf136b85bf0c><9ea11a70a0a1ce842e2adf136b85bf0c>]
+[<2dfe6c28f731ddc99f685436b6376934><2dfe6c28f731ddc99f685436b6376934>]
 % ReportLab generated PDF document -- digest (opensource)
 
 /Info 16 0 R
@@ -3199,5 +3199,5 @@ trailer
 /Size 29
 >>
 startxref
-85344
+85376
 %%EOF

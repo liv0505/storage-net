@@ -33,6 +33,24 @@ EXPECTED_SUMMARY_HEADERS = [
     "sparse_link_utilization_cv",
 ]
 
+EXPECTED_HOP_VOLUME_HEADERS = [
+    "topology",
+    "workload",
+    "routing_mode",
+    "hop_count",
+    "offered_volume_gb",
+    "offered_volume_pct",
+]
+
+EXPECTED_LINK_VOLUME_HEADERS = [
+    "topology",
+    "workload",
+    "routing_mode",
+    "offered_volume_gb",
+    "link_count",
+    "link_ratio_pct",
+]
+
 
 @pytest.fixture
 def output_dir() -> Path:
@@ -57,6 +75,51 @@ def test_pipeline_writes_new_metric_columns(output_dir: Path):
 
     assert len(rows) == 1
     assert rows[0]["topology"] == "2D-FullMesh"
+
+
+def test_pipeline_writes_hop_and_link_volume_distribution_csvs(output_dir: Path):
+    cfg = AnalysisConfig(output_dir=output_dir)
+    paths = run_full_analysis(cfg, ["2D-FullMesh"])
+
+    with paths["hop_volume_csv"].open("r", encoding="utf-8", newline="") as handle:
+        hop_reader = csv.DictReader(handle)
+        assert hop_reader.fieldnames == EXPECTED_HOP_VOLUME_HEADERS
+        hop_rows = list(hop_reader)
+
+    with paths["link_volume_csv"].open("r", encoding="utf-8", newline="") as handle:
+        link_reader = csv.DictReader(handle)
+        assert link_reader.fieldnames == EXPECTED_LINK_VOLUME_HEADERS
+        link_rows = list(link_reader)
+
+    assert len(hop_rows) > 0
+    assert len(link_rows) > 0
+    assert {row["workload"] for row in hop_rows} == {"A2A", "Sparse 1-to-N"}
+    assert {row["workload"] for row in link_rows} == {"A2A", "Sparse 1-to-N"}
+
+
+def test_pipeline_includes_custom_traffic_workload_in_dashboard(output_dir: Path):
+    traffic_file = output_dir / "custom.csv"
+    traffic_file.write_text(
+        "src,dst,gb\n"
+        "en0:ssu0,en5:ssu0,4\n"
+        "en0:ssu1,en5:ssu1,2\n",
+        encoding="utf-8",
+    )
+    cfg = AnalysisConfig(
+        output_dir=output_dir,
+        custom_traffic_file=str(traffic_file),
+        custom_traffic_name="Custom M-to-N",
+    )
+    paths = run_full_analysis(cfg, ["2D-Torus"])
+
+    html = paths["html"].read_text(encoding="utf-8")
+    assert "Custom M-to-N" in html
+    assert "Custom M-to-N Directional Traffic" in html
+    assert "Custom M-to-N Routing Comparison" in html
+
+    with paths["hop_volume_csv"].open("r", encoding="utf-8", newline="") as handle:
+        hop_rows = list(csv.DictReader(handle))
+    assert "Custom M-to-N" in {row["workload"] for row in hop_rows}
 
 
 def test_pipeline_writes_routing_and_workload_config(output_dir: Path):

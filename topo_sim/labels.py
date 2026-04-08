@@ -8,6 +8,11 @@ _WORKLOAD_DISPLAY_NAMES = {
 
 _TOPOLOGY_DISPLAY_NAMES = {
     "DF": "Dragon-Fly",
+    "DF-Shuffled": "Dragon-Fly Shuffled",
+    "DF-ScaleUp": "Dragon-Fly Scale-Up",
+    "DF-2P-Double-4Global": "Dragon-Fly 2P Double + 4 Global",
+    "DF-2P-Triple-3Global": "Dragon-Fly 2P Triple + 3 Global",
+    "DF-2P-Double-Bridge-3Global": "Dragon-Fly 2P Double + Bridge + 3 Global",
 }
 
 

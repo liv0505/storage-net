@@ -71,7 +71,7 @@ def parse_args() -> argparse.Namespace:
         "--topologies",
         type=_parse_topologies,
         default=",".join(base_cfg.topology_names),
-        help="Comma-separated topology names. Example: 2D-FullMesh,2D-Torus,3D-Torus,Clos,DF",
+        help="Comma-separated topology names. Example: 2D-FullMesh,2D-Torus,3D-Torus,Clos,DF,DF-Shuffled,DF-ScaleUp,DF-2P-Double-4Global",
     )
     parser.add_argument(
         "--routing-mode",
@@ -110,6 +110,18 @@ def parse_args() -> argparse.Namespace:
         default=base_cfg.df_external_servers_per_union,
     )
     parser.add_argument(
+        "--custom-traffic-file",
+        type=str,
+        default=base_cfg.custom_traffic_file,
+        help="Optional .csv or .json file describing an extra custom M-to-N workload.",
+    )
+    parser.add_argument(
+        "--custom-traffic-name",
+        type=str,
+        default=base_cfg.custom_traffic_name,
+        help="Display name for the custom traffic workload when the input file does not define one.",
+    )
+    parser.add_argument(
         "--message-size-mb", type=_positive_float_arg, default=base_cfg.message_size_mb
     )
     parser.add_argument(
@@ -137,6 +149,8 @@ def main() -> None:
         clos_uplinks_per_exchange_node=args.clos_uplinks_per_exchange_node,
         df_unions_per_server=args.df_unions_per_server,
         df_external_servers_per_union=args.df_external_servers_per_union,
+        custom_traffic_file=args.custom_traffic_file,
+        custom_traffic_name=args.custom_traffic_name,
         link_bandwidth_gbps=args.bandwidth_gbps,
         message_size_mb=args.message_size_mb,
         traffic_samples=args.traffic_samples,

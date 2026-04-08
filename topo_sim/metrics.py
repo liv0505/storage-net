@@ -15,6 +15,7 @@ from .traffic import FlowDemand, build_a2a_demands
 
 Edge = tuple[object, object]
 WorkloadDetails = dict[str, Any]
+_VOLUME_BUCKET_DECIMALS = 4
 
 
 def _edge_key(u: object, v: object) -> Edge:
@@ -23,6 +24,21 @@ def _edge_key(u: object, v: object) -> Edge:
 
 def _ssu_nodes(g: nx.Graph) -> list[str]:
     return [str(node_id) for node_id, data in g.nodes(data=True) if data.get("node_role") == "ssu"]
+
+
+def _ssu_components(g: nx.Graph) -> list[list[str]]:
+    components: list[list[str]] = []
+    for component_nodes in nx.connected_components(g):
+        component_ssus = sorted(
+            [
+                str(node_id)
+                for node_id in component_nodes
+                if g.nodes[node_id].get("node_role") == "ssu"
+            ]
+        )
+        if component_ssus:
+            components.append(component_ssus)
+    return components
 
 
 def _exchange_id(node_id: str) -> str:
@@ -58,7 +74,11 @@ def _infer_direct_topology_kind(g: nx.Graph) -> str | None:
 
 
 def _is_df_topology(g: nx.Graph) -> bool:
-    return str(g.graph.get("topology_name", "")).upper() == "DF"
+    family = str(g.graph.get("topology_family", "")).upper()
+    if family == "DF":
+        return True
+    topology_name = str(g.graph.get("topology_name", "")).upper()
+    return topology_name == "DF" or topology_name.startswith("DF-")
 
 
 def _server_id(g: nx.Graph, node_id: str) -> int | None:
@@ -121,6 +141,41 @@ def _exchange_to_coord_3d(exchange_id: str, size: int) -> tuple[int, int, int]:
     return x, y, z
 
 
+def _single_plane_torus_candidate_exchange_partitions(
+    g: nx.Graph,
+    exchange_ids: list[str],
+) -> list[frozenset[str]]:
+    grid_shape = g.graph.get("torus_exchange_grid_shape")
+    if not grid_shape:
+        return []
+
+    normalized_shape = tuple(int(value) for value in grid_shape)
+    exchange_coords: dict[str, tuple[int, ...]] = {}
+    for exchange_id in exchange_ids:
+        coord = (g.nodes.get(f"{exchange_id}:union0") or {}).get("exchange_grid_coord")
+        if coord is None:
+            return []
+        exchange_coords[exchange_id] = tuple(int(value) for value in coord)
+
+    half = len(exchange_ids) // 2
+    partitions: list[frozenset[str]] = []
+    seen: set[frozenset[str]] = set()
+    for axis, axis_size in enumerate(normalized_shape):
+        if axis_size <= 1 or axis_size % 2 != 0:
+            continue
+        midpoint = axis_size // 2
+        side_a = frozenset(
+            exchange_id
+            for exchange_id, coord in exchange_coords.items()
+            if coord[axis] < midpoint
+        )
+        if len(side_a) == half and side_a not in seen:
+            seen.add(side_a)
+            partitions.append(side_a)
+
+    return partitions
+
+
 def _candidate_exchange_partitions(g: nx.Graph) -> list[frozenset[str]]:
     exchange_ids = _exchange_ids(g)
     exchange_count = len(exchange_ids)
@@ -129,6 +184,11 @@ def _candidate_exchange_partitions(g: nx.Graph) -> list[frozenset[str]]:
 
     topology_kind = _infer_direct_topology_kind(g)
     half = exchange_count // 2
+
+    if topology_kind in {"2D-TORUS", "3D-TORUS"} and str(g.graph.get("direct_backend_mode", "")) == "single_plane":
+        partitions = _single_plane_torus_candidate_exchange_partitions(g, exchange_ids)
+        if partitions:
+            return partitions
 
     if topology_kind == "3D-TORUS" and exchange_count > 18:
         size = _torus_side_length(exchange_count, dimensions=3)
@@ -212,7 +272,85 @@ def _sliding_window_exchange_partitions(
     return partitions
 
 
-def _backend_only_balanced_bisection_bandwidth_gbps(g: nx.Graph) -> float:
+def _backend_component_subgraphs(g: nx.Graph) -> list[nx.Graph]:
+    backend_graph = nx.Graph()
+    for u, v, data in g.edges(data=True):
+        if data.get("link_kind") != "backend_interconnect":
+            continue
+        backend_graph.add_edge(str(u), str(v), **data)
+
+    if backend_graph.number_of_edges() == 0:
+        return []
+
+    return [g.subgraph({str(node_id) for node_id in component_nodes}).copy() for component_nodes in nx.connected_components(backend_graph)]
+
+
+def _balanced_partition_candidates(items: list[object]) -> list[frozenset[object]]:
+    if len(items) < 2:
+        return []
+
+    ordered = list(items)
+    side_a_size = len(ordered) // 2
+    if side_a_size <= 0:
+        return []
+
+    if len(ordered) % 2 == 0:
+        fixed = ordered[0]
+        return [
+            frozenset((fixed, *combo))
+            for combo in combinations(ordered[1:], side_a_size - 1)
+        ]
+    return [frozenset(combo) for combo in combinations(ordered, side_a_size)]
+
+
+def _df_local_group_graph(g: nx.Graph) -> nx.Graph:
+    group_graph = nx.Graph()
+    for node_id, data in g.nodes(data=True):
+        if data.get("node_role") != "union":
+            continue
+        server_id = data.get("server_id")
+        if server_id is not None:
+            group_graph.add_node(int(server_id))
+
+    for u, v, data in g.edges(data=True):
+        if data.get("link_kind") != "backend_interconnect":
+            continue
+        server_u = g.nodes[u].get("server_id")
+        server_v = g.nodes[v].get("server_id")
+        if server_u is None or server_v is None or int(server_u) == int(server_v):
+            continue
+        left = int(server_u)
+        right = int(server_v)
+        bandwidth = float(data.get("bandwidth_gbps", 0.0))
+        if group_graph.has_edge(left, right):
+            group_graph[left][right]["bandwidth_gbps"] += bandwidth
+        else:
+            group_graph.add_edge(left, right, bandwidth_gbps=bandwidth)
+    return group_graph
+
+
+def _df_group_level_bisection_bandwidth_component_gbps(g: nx.Graph) -> float:
+    group_graph = _df_local_group_graph(g)
+    group_ids = sorted(group_graph.nodes())
+    candidate_partitions = _balanced_partition_candidates(group_ids)
+    if not candidate_partitions:
+        return 0.0
+
+    best_cut = float("inf")
+    for side_a in candidate_partitions:
+        cut_value = 0.0
+        for left, right, data in group_graph.edges(data=True):
+            if (left in side_a) != (right in side_a):
+                cut_value += float(data.get("bandwidth_gbps", 0.0))
+        best_cut = min(best_cut, cut_value)
+
+    return 0.0 if best_cut == float("inf") else float(best_cut)
+
+
+def _backend_only_balanced_bisection_bandwidth_component_gbps(g: nx.Graph) -> float:
+    if _is_df_topology(g):
+        return _df_group_level_bisection_bandwidth_component_gbps(g)
+
     candidate_partitions = _candidate_exchange_partitions(g)
     if not candidate_partitions:
         return 0.0
@@ -249,12 +387,21 @@ def _backend_only_balanced_bisection_bandwidth_gbps(g: nx.Graph) -> float:
     return 0.0 if best_cut == float("inf") else float(best_cut)
 
 
+def _backend_only_balanced_bisection_bandwidth_gbps(g: nx.Graph) -> float:
+    component_subgraphs = _backend_component_subgraphs(g)
+    if not component_subgraphs:
+        return 0.0
+    return float(
+        sum(_backend_only_balanced_bisection_bandwidth_component_gbps(subgraph) for subgraph in component_subgraphs)
+    )
+
+
 def compute_structural_metrics(g: nx.Graph) -> dict[str, float]:
     ssus = _ssu_nodes(g)
     total_ssu_count = len(ssus)
     bisection_bandwidth_gbps = _backend_only_balanced_bisection_bandwidth_gbps(g)
     bisection_bandwidth_gbps_per_ssu = (
-        bisection_bandwidth_gbps / float(total_ssu_count) if total_ssu_count > 0 else 0.0
+        (2.0 * bisection_bandwidth_gbps / float(total_ssu_count)) if total_ssu_count > 0 else 0.0
     )
     if total_ssu_count < 2:
         return {
@@ -265,17 +412,16 @@ def compute_structural_metrics(g: nx.Graph) -> dict[str, float]:
         }
 
     pair_hops: list[float] = []
-    reachable_pairs = 0
-    total_pairs = len(ssus) * (len(ssus) - 1) // 2
-
-    for idx, src in enumerate(ssus):
-        lengths = nx.single_source_shortest_path_length(g, src)
-        for dst in ssus[idx + 1 :]:
-            hop_count = lengths.get(dst)
-            if hop_count is None:
-                continue
-            pair_hops.append(float(hop_count))
-            reachable_pairs += 1
+    for component_ssus in _ssu_components(g):
+        if len(component_ssus) < 2:
+            continue
+        for idx, src in enumerate(component_ssus):
+            lengths = nx.single_source_shortest_path_length(g, src)
+            for dst in component_ssus[idx + 1 :]:
+                hop_count = lengths.get(dst)
+                if hop_count is None:
+                    continue
+                pair_hops.append(float(hop_count))
 
     if pair_hops:
         average_hops = float(statistics.fmean(pair_hops))
@@ -283,9 +429,6 @@ def compute_structural_metrics(g: nx.Graph) -> dict[str, float]:
     else:
         average_hops = 0.0
         diameter = 0.0
-
-    if reachable_pairs < total_pairs:
-        diameter = float("inf")
 
     return {
         "diameter": diameter,
@@ -298,6 +441,10 @@ def compute_structural_metrics(g: nx.Graph) -> dict[str, float]:
 def _edge_capacity_bits_per_s(edge_data: dict[str, float], cfg: AnalysisConfig) -> float:
     bandwidth_gbps = float(edge_data.get("bandwidth_gbps", cfg.link_bandwidth_gbps))
     return max(bandwidth_gbps * 1e9, 1.0)
+
+
+def _bits_to_gb(bits: float) -> float:
+    return float(bits) / 8e9
 
 
 def _completion_time_from_edge_loads(
@@ -331,6 +478,7 @@ def _expected_hops_from_paths(paths: list[RoutedPath]) -> float:
 def _accumulate_routed_paths(
     edge_load_bits: dict[Edge, float],
     source_edge_load_bits: dict[str, dict[Edge, float]],
+    hop_load_bits: dict[int, float],
     demand: FlowDemand,
     paths: list[RoutedPath],
 ) -> tuple[bool, float]:
@@ -348,6 +496,7 @@ def _accumulate_routed_paths(
         split_weight = path.weight / total_weight
         expected_hops += path.hops * split_weight
         split_bits = bits * split_weight
+        hop_load_bits[int(path.hops)] += split_bits
         for u, v in zip(path.nodes[:-1], path.nodes[1:]):
             key = _edge_key(u, v)
             edge_load_bits[key] += split_bits
@@ -358,13 +507,23 @@ def _accumulate_routed_paths(
 def _should_use_exact_shortest_path_fast_path(g: nx.Graph, routing_mode: str) -> bool:
     if normalize_routing_mode(routing_mode) != "SHORTEST_PATH":
         return False
-    return _infer_direct_topology_kind(g) in {"2D-FULLMESH", "2D-TORUS", "3D-TORUS"}
+    return _infer_direct_topology_kind(g) == "2D-FULLMESH"
 
 
 def _should_use_direct_projection_fast_path(g: nx.Graph, routing_mode: str) -> bool:
-    if normalize_routing_mode(routing_mode) not in {"DOR", "FULL_PATH"}:
+    mode = normalize_routing_mode(routing_mode)
+    if mode in {"DOR", "FULL_PATH"}:
+        return _infer_direct_topology_kind(g) in {"2D-FULLMESH", "2D-TORUS", "3D-TORUS"}
+    if mode == "SHORTEST_PATH" and _is_single_plane_direct_torus(g):
+        return True
+    return False
+
+
+def _is_single_plane_direct_torus(g: nx.Graph) -> bool:
+    topology_kind = _infer_direct_topology_kind(g)
+    if topology_kind not in {"2D-TORUS", "3D-TORUS"}:
         return False
-    return _infer_direct_topology_kind(g) in {"2D-FULLMESH", "2D-TORUS", "3D-TORUS"}
+    return str(g.graph.get("direct_backend_mode", "dual_plane")) == "single_plane"
 
 
 def _shortest_edge_fractions(
@@ -442,6 +601,7 @@ def _evaluate_shortest_path_workload_exact_fast(
 ) -> WorkloadDetails:
     edge_load_bits: dict[Edge, float] = defaultdict(float)
     source_edge_load_bits: dict[str, dict[Edge, float]] = defaultdict(lambda: defaultdict(float))
+    hop_load_bits: dict[int, float] = defaultdict(float)
     fallback_path_cache: dict[tuple[str, str], list[RoutedPath]] = {}
     plane_graph_cache: dict[str, nx.Graph] = {}
     fraction_cache: dict[tuple[str, str, str], list[tuple[Edge, float]]] = {}
@@ -466,6 +626,7 @@ def _evaluate_shortest_path_workload_exact_fast(
             routed, expected_hops = _accumulate_routed_paths(
                 edge_load_bits,
                 source_edge_load_bits,
+                hop_load_bits,
                 demand,
                 fallback_path_cache[pair],
             )
@@ -497,7 +658,9 @@ def _evaluate_shortest_path_workload_exact_fast(
         )
         plane_bits = bits / float(len(plane_payloads))
 
-        for source_union, dst_union, fractions, _ in plane_payloads:
+        for source_union, dst_union, fractions, total_hops_value in plane_payloads:
+            total_hops = int(round(total_hops_value))
+            hop_load_bits[total_hops] += plane_bits
             src_internal = _edge_key(demand.src, source_union)
             edge_load_bits[src_internal] += plane_bits
             source_edge_load_bits[demand.src][src_internal] += plane_bits
@@ -515,6 +678,7 @@ def _evaluate_shortest_path_workload_exact_fast(
         g,
         edge_load_bits,
         source_edge_load_bits,
+        hop_load_bits,
         routed_demand_bits,
         routed_hop_weighted_sum,
         active_sources,
@@ -524,23 +688,25 @@ def _evaluate_shortest_path_workload_exact_fast(
 
 def _projection_from_paths(
     paths: list[RoutedPath],
-) -> tuple[dict[str, float], dict[str, float], dict[Edge, float], float]:
+) -> tuple[dict[str, float], dict[str, float], dict[Edge, float], dict[int, float], float]:
     usable_paths = [path for path in paths if path.weight > 0]
     if not usable_paths:
-        return {}, {}, {}, 0.0
+        return {}, {}, {}, {}, 0.0
 
     total_weight = sum(path.weight for path in usable_paths)
     if total_weight <= 0:
-        return {}, {}, {}, 0.0
+        return {}, {}, {}, {}, 0.0
 
     source_union_fractions: dict[str, float] = defaultdict(float)
     destination_union_fractions: dict[str, float] = defaultdict(float)
     backend_edge_fractions: dict[Edge, float] = defaultdict(float)
+    hop_fractions: dict[int, float] = defaultdict(float)
     expected_hops = 0.0
 
     for path in usable_paths:
         normalized_weight = path.weight / total_weight
         expected_hops += path.hops * normalized_weight
+        hop_fractions[int(path.hops)] += normalized_weight
         if len(path.nodes) < 4:
             continue
         source_union = str(path.nodes[1])
@@ -555,6 +721,7 @@ def _projection_from_paths(
         dict(source_union_fractions),
         dict(destination_union_fractions),
         dict(backend_edge_fractions),
+        dict(hop_fractions),
         float(expected_hops),
     )
 
@@ -567,10 +734,11 @@ def _evaluate_direct_workload_projection_fast(
 ) -> WorkloadDetails:
     edge_load_bits: dict[Edge, float] = defaultdict(float)
     source_edge_load_bits: dict[str, dict[Edge, float]] = defaultdict(lambda: defaultdict(float))
+    hop_load_bits: dict[int, float] = defaultdict(float)
     same_exchange_path_cache: dict[tuple[str, str], list[RoutedPath]] = {}
     projection_cache: dict[
         tuple[str, str, str],
-        tuple[dict[str, float], dict[str, float], dict[Edge, float], float],
+        tuple[dict[str, float], dict[str, float], dict[Edge, float], dict[int, float], float],
     ] = {}
 
     normalized_mode = normalize_routing_mode(routing_mode)
@@ -594,6 +762,7 @@ def _evaluate_direct_workload_projection_fast(
             routed, expected_hops = _accumulate_routed_paths(
                 edge_load_bits,
                 source_edge_load_bits,
+                hop_load_bits,
                 demand,
                 same_exchange_path_cache[pair],
             )
@@ -614,13 +783,21 @@ def _evaluate_direct_workload_projection_fast(
             source_union_fractions,
             destination_union_fractions,
             backend_edge_fractions,
+            hop_fractions,
             expected_hops,
         ) = projection_cache[cache_key]
-        if not source_union_fractions and not destination_union_fractions and not backend_edge_fractions:
+        if (
+            not source_union_fractions
+            and not destination_union_fractions
+            and not backend_edge_fractions
+            and not hop_fractions
+        ):
             continue
 
         routed_demand_bits += bits
         routed_hop_weighted_sum += bits * expected_hops
+        for hop_count, fraction in hop_fractions.items():
+            hop_load_bits[int(hop_count)] += bits * fraction
 
         for source_union, fraction in source_union_fractions.items():
             split_bits = bits * fraction
@@ -643,6 +820,7 @@ def _evaluate_direct_workload_projection_fast(
         g,
         edge_load_bits,
         source_edge_load_bits,
+        hop_load_bits,
         routed_demand_bits,
         routed_hop_weighted_sum,
         active_sources,
@@ -650,10 +828,51 @@ def _evaluate_direct_workload_projection_fast(
     )
 
 
+def _hop_volume_distribution_rows(
+    hop_load_bits: dict[int, float],
+    routed_demand_bits: float,
+) -> list[dict[str, float]]:
+    if routed_demand_bits <= 0:
+        return []
+    return [
+        {
+            "hop_count": int(hop_count),
+            "offered_volume_gb": _bits_to_gb(offered_bits),
+            "offered_volume_pct": (float(offered_bits) / float(routed_demand_bits)) * 100.0,
+        }
+        for hop_count, offered_bits in sorted(hop_load_bits.items())
+        if offered_bits > 0
+    ]
+
+
+def _link_volume_distribution_rows(
+    edge_load_bits: dict[Edge, float],
+) -> list[dict[str, float]]:
+    positive_loads = [float(offered_bits) for offered_bits in edge_load_bits.values() if offered_bits > 0]
+    if not positive_loads:
+        return []
+
+    volume_buckets: dict[float, int] = defaultdict(int)
+    for offered_bits in positive_loads:
+        volume_bucket = round(_bits_to_gb(offered_bits), _VOLUME_BUCKET_DECIMALS)
+        volume_buckets[volume_bucket] += 1
+
+    total_links = len(positive_loads)
+    return [
+        {
+            "offered_volume_gb": float(volume_gb),
+            "link_count": int(link_count),
+            "link_ratio_pct": (float(link_count) / float(total_links)) * 100.0,
+        }
+        for volume_gb, link_count in sorted(volume_buckets.items())
+    ]
+
+
 def _finalize_workload_details(
     g: nx.Graph,
     edge_load_bits: dict[Edge, float],
     source_edge_load_bits: dict[str, dict[Edge, float]],
+    hop_load_bits: dict[int, float],
     routed_demand_bits: float,
     routed_hop_weighted_sum: float,
     active_sources: set[str],
@@ -728,6 +947,8 @@ def _finalize_workload_details(
             for edge_key, offered_bits in edge_load_bits.items()
             if offered_bits > 0
         },
+        "hop_volume_distribution": _hop_volume_distribution_rows(hop_load_bits, routed_demand_bits),
+        "link_volume_distribution": _link_volume_distribution_rows(edge_load_bits),
     }
 
 
@@ -739,6 +960,7 @@ def _evaluate_workload_via_explicit_paths(
 ) -> WorkloadDetails:
     edge_load_bits: dict[Edge, float] = defaultdict(float)
     source_edge_load_bits: dict[str, dict[Edge, float]] = defaultdict(lambda: defaultdict(float))
+    hop_load_bits: dict[int, float] = defaultdict(float)
     path_cache: dict[tuple[str, str], list[RoutedPath]] = {}
 
     routed_demand_bits = 0.0
@@ -759,6 +981,7 @@ def _evaluate_workload_via_explicit_paths(
         routed, expected_hops = _accumulate_routed_paths(
             edge_load_bits,
             source_edge_load_bits,
+            hop_load_bits,
             demand,
             path_cache[pair],
         )
@@ -770,6 +993,7 @@ def _evaluate_workload_via_explicit_paths(
         g,
         edge_load_bits,
         source_edge_load_bits,
+        hop_load_bits,
         routed_demand_bits,
         routed_hop_weighted_sum,
         active_sources,

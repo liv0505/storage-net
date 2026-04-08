@@ -592,24 +592,17 @@
                       </tr>
                     </thead>
                     <tbody>
+                      {% for workload in r.workload_metric_rows %}
                       <tr>
-                        <td>A2A</td>
-                        <td>{{ '%.2f'|format(r.communication_metrics['A2A'].per_ssu_throughput_gbps) }} Gbps</td>
-                        <td>{{ '%.4f'|format(r.communication_metrics['A2A'].completion_time_s) }} s</td>
-                        <td>{{ '%.4f'|format(r.communication_metrics['A2A'].completion_time_p95_s) }} s</td>
-                        <td>{{ '%.2f'|format(r.communication_metrics['A2A'].average_hops) }}</td>
-                        <td>{{ '%.2f'|format(r.communication_metrics['A2A'].max_link_utilization * 100) }}%</td>
-                        <td>{{ '%.3f'|format(r.communication_metrics['A2A'].link_utilization_cv) }}</td>
+                        <td>{{ workload.display_name }}</td>
+                        <td>{{ '%.2f'|format(workload.per_ssu_throughput_gbps) }} Gbps</td>
+                        <td>{{ '%.4f'|format(workload.completion_time_s) }} s</td>
+                        <td>{{ '%.4f'|format(workload.completion_time_p95_s) }} s</td>
+                        <td>{{ '%.2f'|format(workload.average_hops) }}</td>
+                        <td>{{ '%.2f'|format(workload.max_link_utilization * 100) }}%</td>
+                        <td>{{ '%.3f'|format(workload.link_utilization_cv) }}</td>
                       </tr>
-                      <tr>
-                        <td>Sparse M-to-N</td>
-                        <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].per_ssu_throughput_gbps) }} Gbps</td>
-                        <td>{{ '%.4f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_s) }} s</td>
-                        <td>{{ '%.4f'|format(r.communication_metrics['Sparse 1-to-N'].completion_time_p95_s) }} s</td>
-                        <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].average_hops) }}</td>
-                        <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].max_link_utilization * 100) }}%</td>
-                        <td>{{ '%.3f'|format(r.communication_metrics['Sparse 1-to-N'].link_utilization_cv) }}</td>
-                      </tr>
+                      {% endfor %}
                     </tbody>
                   </table>
                 </div>

@@ -114,27 +114,28 @@ def _comparison_table_rows(section: dict[str, Any], columns: list[dict[str, str]
 
 
 def _single_route_summary_rows(item: dict[str, Any]) -> list[list[str]]:
-    return [
-        ["Workload", "Per SSU Throughput", "Completion Time", "P95 Completion", "Average Hops", "Max Link Utilization", "Link Utilization CV"],
-        [
-            "A2A",
-            f"{item['communication_metrics']['A2A']['per_ssu_throughput_gbps']:.2f} Gbps",
-            f"{item['communication_metrics']['A2A']['completion_time_s']:.4f} s",
-            f"{item['communication_metrics']['A2A']['completion_time_p95_s']:.4f} s",
-            f"{item['communication_metrics']['A2A']['average_hops']:.2f}",
-            f"{item['communication_metrics']['A2A']['max_link_utilization'] * 100:.2f}%",
-            f"{item['communication_metrics']['A2A']['link_utilization_cv']:.3f}",
-        ],
-        [
-            display_workload_name("Sparse 1-to-N"),
-            f"{item['communication_metrics']['Sparse 1-to-N']['per_ssu_throughput_gbps']:.2f} Gbps",
-            f"{item['communication_metrics']['Sparse 1-to-N']['completion_time_s']:.4f} s",
-            f"{item['communication_metrics']['Sparse 1-to-N']['completion_time_p95_s']:.4f} s",
-            f"{item['communication_metrics']['Sparse 1-to-N']['average_hops']:.2f}",
-            f"{item['communication_metrics']['Sparse 1-to-N']['max_link_utilization'] * 100:.2f}%",
-            f"{item['communication_metrics']['Sparse 1-to-N']['link_utilization_cv']:.3f}",
-        ],
-    ]
+    rows = [[
+        "Workload",
+        "Per SSU Throughput",
+        "Completion Time",
+        "P95 Completion",
+        "Average Hops",
+        "Max Link Utilization",
+        "Link Utilization CV",
+    ]]
+    for workload in item.get("workload_metric_rows", []):
+        rows.append(
+            [
+                workload["display_name"],
+                f"{workload['per_ssu_throughput_gbps']:.2f} Gbps",
+                f"{workload['completion_time_s']:.4f} s",
+                f"{workload['completion_time_p95_s']:.4f} s",
+                f"{workload['average_hops']:.2f}",
+                f"{workload['max_link_utilization'] * 100:.2f}%",
+                f"{workload['link_utilization_cv']:.3f}",
+            ]
+        )
+    return rows
 
 
 def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
@@ -280,6 +281,14 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
                 "a2a_scope": item["workloads"]["a2a_scope"],
                 "sparse_active_ratio": item["workloads"]["sparse_active_ratio"],
                 "sparse_target_count": item["workloads"]["sparse_target_count"],
+                **(
+                    {
+                        "custom_traffic_file": item["workloads"]["custom_traffic_file"],
+                        "custom_traffic_name": item["workloads"]["custom_traffic_name"],
+                    }
+                    if item["workloads"].get("custom_traffic_file")
+                    else {}
+                ),
             },
             styles,
         )

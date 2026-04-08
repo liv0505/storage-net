@@ -10,13 +10,15 @@ from topo_sim.config import AnalysisConfig
 
 def test_analysis_config_defaults_match_ssu_design():
     cfg = AnalysisConfig()
-    assert cfg.topology_names == ["2D-FullMesh", "2D-Torus", "3D-Torus", "Clos"]
+    assert cfg.topology_names == ["2D-FullMesh", "2D-Torus", "3D-Torus", "Clos", "DF"]
     assert cfg.sparse_active_ratio == 0.25
     assert cfg.sparse_target_count == 2
     assert cfg.port_balanced_max_detour_hops == 1
     assert cfg.clos_uplinks_per_exchange_node == 4
     assert cfg.df_unions_per_server == 4
     assert cfg.df_external_servers_per_union == 3
+    assert cfg.custom_traffic_file is None
+    assert cfg.custom_traffic_name == "Custom M-to-N"
 
 
 def test_parse_args_accepts_new_topology_names(monkeypatch):
@@ -42,6 +44,37 @@ def test_parse_args_accepts_df_topology(monkeypatch):
     monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "DF"])
     args = parse_args()
     assert args.topologies == "DF"
+
+
+def test_parse_args_accepts_df_variants(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "DF-Shuffled,DF-ScaleUp"])
+    args = parse_args()
+    assert args.topologies == "DF-Shuffled,DF-ScaleUp"
+
+
+def test_parse_args_accepts_2p_df_variants(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["main.py", "--topologies", "DF-2P-Double-4Global,DF-2P-Double-Bridge-3Global"],
+    )
+    args = parse_args()
+    assert args.topologies == "DF-2P-Double-4Global,DF-2P-Double-Bridge-3Global"
+
+
+def test_parse_args_accepts_custom_traffic_file_and_name(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "main.py",
+            "--custom-traffic-file",
+            "traffic/custom.json",
+            "--custom-traffic-name",
+            "Hotspot",
+        ],
+    )
+    args = parse_args()
+    assert args.custom_traffic_file == "traffic/custom.json"
+    assert args.custom_traffic_name == "Hotspot"
 
 
 @pytest.mark.parametrize("routing_mode", ["DOR", "ECMP", "SHORTEST_PATH", "FULL_PATH", "MIN_HOPS", "PORT_BALANCED"])
@@ -139,6 +172,8 @@ def test_main_passes_cli_values_into_config_and_run_full_analysis(monkeypatch):
             clos_uplinks_per_exchange_node=4,
             df_unions_per_server=4,
             df_external_servers_per_union=3,
+            custom_traffic_file="traffic/custom.csv",
+            custom_traffic_name="My Traffic",
             message_size_mb=8.0,
             bandwidth_gbps=200.0,
             traffic_samples=123,
@@ -169,4 +204,6 @@ def test_main_passes_cli_values_into_config_and_run_full_analysis(monkeypatch):
     assert cfg.clos_uplinks_per_exchange_node == 4
     assert cfg.df_unions_per_server == 4
     assert cfg.df_external_servers_per_union == 3
+    assert cfg.custom_traffic_file == "traffic/custom.csv"
+    assert cfg.custom_traffic_name == "My Traffic"
     assert cfg.routing_mode == "FULL_PATH"
