@@ -54,12 +54,8 @@ def test_2d_torus_has_expected_backend_structure():
         for _, _, data in g.edges(data=True)
         if data["link_kind"] == "backend_interconnect"
     ]
-    assert len(backend) == 32
-    assert {data["topology_role"] for data in backend} == {
-        "2d_torus_x",
-        "2d_torus_y",
-        "2d_torus_local",
-    }
+    assert len(backend) == 64
+    assert {data["topology_role"] for data in backend} == {"2d_torus_x", "2d_torus_y"}
 
 
 def test_3d_torus_has_uniform_backend_bandwidth_per_direction():
@@ -395,7 +391,7 @@ def test_df_variants_share_ssus_across_two_backend_plane_components(
         ("name", "expected_ssus", "expected_unions", "expected_ssu_union_links", "expected_union_union_links"),
     [
         ("2D-FullMesh", 128, 32, 256, 96),
-        ("2D-Torus", 64, 16, 128, 32),
+        ("2D-Torus", 128, 32, 256, 64),
         ("3D-Torus", 256, 64, 512, 192),
         ("Clos", 144, 36, 288, 144),
         ("DF", 416, 104, 832, 312),
@@ -445,7 +441,7 @@ def test_df_2p_bridge_variant_rejects_non_four_union_servers():
 def test_build_topology_is_case_insensitive_and_trims_whitespace():
     g = build_topology("  2d-tOrUs  ", AnalysisConfig())
     ssu_nodes = [n for n, d in g.nodes(data=True) if d["node_role"] == "ssu"]
-    assert len(ssu_nodes) == 8 * 8
+    assert len(ssu_nodes) == 16 * 8
 
 
 def test_build_topology_rejects_invalid_name_type():

@@ -22,7 +22,7 @@ def test_structural_metrics_use_backend_only_balanced_bisection_bandwidth():
     g = build_topology("2D-Torus", AnalysisConfig())
     metrics = compute_structural_metrics(g)
 
-    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(3200.0)
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(6400.0)
     assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(100.0)
 
 

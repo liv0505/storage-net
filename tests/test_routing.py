@@ -28,7 +28,7 @@ def _backend_roles_for_path(g, path_nodes: tuple[str, ...]) -> list[str]:
     return roles
 
 
-def test_dor_returns_two_min_hop_paths_for_single_plane_2d_torus():
+def test_dor_returns_two_plane_paths_for_2d_torus():
     g = build_topology("2D-Torus", AnalysisConfig())
     paths = compute_paths(g, "en0:ssu0", "en5:ssu0", routing_mode="DOR", cfg=AnalysisConfig())
 
@@ -37,14 +37,14 @@ def test_dor_returns_two_min_hop_paths_for_single_plane_2d_torus():
     assert {path.nodes[-2] for path in paths} == {"en5:union0", "en5:union1"}
     assert {round(path.weight, 8) for path in paths} == {0.5}
     assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
-    assert {path.hops for path in paths} == {5}
+    assert {path.hops for path in paths} == {4}
     for path in paths:
         assert path.nodes[0] == "en0:ssu0"
         assert path.nodes[-1] == "en5:ssu0"
-        assert _backend_roles_for_path(g, path.nodes) == ["2d_torus_x", "2d_torus_y", "2d_torus_y"]
+        assert _backend_roles_for_path(g, path.nodes) == ["2d_torus_x", "2d_torus_y"]
 
 
-def test_single_plane_2d_torus_shortest_path_splits_across_all_min_hop_choices():
+def test_shortest_path_routing_splits_across_shortest_paths_in_both_planes():
     g = build_topology("2D-Torus", AnalysisConfig())
     paths = compute_paths(
         g,
@@ -54,11 +54,11 @@ def test_single_plane_2d_torus_shortest_path_splits_across_all_min_hop_choices()
         cfg=AnalysisConfig(),
     )
 
-    assert len(paths) == 12
+    assert len(paths) == 4
     assert {path.nodes[1] for path in paths} == {"en0:union0", "en0:union1"}
     assert {path.nodes[-2] for path in paths} == {"en5:union0", "en5:union1"}
-    assert {path.hops for path in paths} == {5}
-    assert {round(path.weight, 8) for path in paths} == {round(1.0 / 12.0, 8)}
+    assert {path.hops for path in paths} == {4}
+    assert {round(path.weight, 8) for path in paths} == {0.25}
     assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
 
 
@@ -114,17 +114,16 @@ def test_2d_torus_shortest_path_differs_from_dor():
 
     assert len(dor_paths) == 2
     assert {tuple(_backend_roles_for_path(g, path.nodes)) for path in dor_paths} == {
-        ("2d_torus_x", "2d_torus_y", "2d_torus_y"),
+        ("2d_torus_x", "2d_torus_y"),
     }
     assert {round(path.weight, 8) for path in dor_paths} == {0.5}
 
-    assert len(shortest_paths) == 12
+    assert len(shortest_paths) == 4
     assert {tuple(_backend_roles_for_path(g, path.nodes)) for path in shortest_paths} == {
-        ("2d_torus_x", "2d_torus_y", "2d_torus_y"),
-        ("2d_torus_y", "2d_torus_x", "2d_torus_y"),
-        ("2d_torus_y", "2d_torus_y", "2d_torus_x"),
+        ("2d_torus_x", "2d_torus_y"),
+        ("2d_torus_y", "2d_torus_x"),
     }
-    assert {round(path.weight, 8) for path in shortest_paths} == {round(1.0 / 12.0, 8)}
+    assert {round(path.weight, 8) for path in shortest_paths} == {0.25}
 
 
 def test_3d_torus_shortest_path_differs_from_dor():

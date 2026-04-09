@@ -249,7 +249,9 @@ def _topology_scale(name: str, g: nx.Graph) -> str:
     if name == "2D-Torus":
         logical_unions = int(g.graph.get("logical_plane_union_count", 0))
         logical_ssus = int(g.graph.get("logical_plane_ssu_count", 0))
-        return f"single torus plane | {logical_unions} Union | {logical_ssus} SSU"
+        plane_count = int(g.graph.get("direct_plane_count", 1))
+        plane_label = "single torus plane" if plane_count == 1 else f"{plane_count} torus planes"
+        return f"{plane_label} | {logical_unions} Union | {logical_ssus} SSU"
     if name == "3D-Torus":
         logical_unions = int(g.graph.get("logical_plane_union_count", 0))
         logical_ssus = int(g.graph.get("logical_plane_ssu_count", 0))
@@ -274,7 +276,7 @@ def _topology_pattern(name: str, g: nx.Graph, cfg: AnalysisConfig) -> str:
         )
     if name == "2D-Torus":
         return (
-            "Each Union uses 4 backend ports on one 4x4 torus of Union chips, and the in-group Union-to-Union link is one of the torus X-direction edges rather than an extra local link."
+            "Each Union uses 4 backend ports on its own 4x4 torus plane, and the two Union chips inside each exchange node stay on two independent torus planes rather than coupling together locally."
         )
     if name == "3D-Torus":
         return (
@@ -419,7 +421,11 @@ def _routing_configuration(name: str, cfg: AnalysisConfig) -> dict[str, Any]:
         notes.append(
             "both Union chips expose the same direct-connect backend plane, so routing decisions are evaluated independently on each Union plane"
         )
-    elif name in {"2D-Torus", "3D-Torus"}:
+    elif name == "2D-Torus":
+        notes.append(
+            "the two Union chips inside each exchange node belong to two independent 4x4 torus planes, so routing evaluates the two planes separately"
+        )
+    elif name == "3D-Torus":
         notes.append(
             "the two Union chips inside each exchange node are locally coupled into one connected torus backend, so routing can enter the torus through either Union"
         )

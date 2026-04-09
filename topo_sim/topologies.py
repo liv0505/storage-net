@@ -629,7 +629,37 @@ def build_2d_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
 
 
 def build_2d_torus(cfg: AnalysisConfig) -> nx.Graph:
-    return _build_single_plane_2d_torus(cfg)
+    g = nx.Graph()
+    rows = 4
+    cols = 4
+    exchanges: dict[tuple[int, int], dict[str, list[str]]] = {}
+
+    for r in range(rows):
+        for c in range(cols):
+            exchange_id = f"en{r * cols + c}"
+            exchanges[(r, c)] = _add_exchange_node(g, exchange_id, cfg)
+
+    for union_index in range(2):
+        for r in range(rows):
+            for c in range(cols):
+                _add_backend_link(
+                    g,
+                    exchanges[(r, c)]["unions"][union_index],
+                    exchanges[(r, (c + 1) % cols)]["unions"][union_index],
+                    topology_role="2d_torus_x",
+                )
+                _add_backend_link(
+                    g,
+                    exchanges[(r, c)]["unions"][union_index],
+                    exchanges[((r + 1) % rows, c)]["unions"][union_index],
+                    topology_role="2d_torus_y",
+                )
+
+    g.graph["direct_backend_mode"] = "dual_plane"
+    g.graph["direct_plane_count"] = 2
+    g.graph["logical_plane_union_count"] = rows * cols * 2
+    g.graph["logical_plane_ssu_count"] = rows * cols * 8
+    return _annotate_graph(g, cfg)
 
 
 def build_3d_torus(cfg: AnalysisConfig) -> nx.Graph:
