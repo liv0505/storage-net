@@ -17,7 +17,7 @@ def test_exact_shortest_path_flow_aggregation_matches_explicit_path_splitting_on
     g = build_topology("2D-Torus", cfg)
     demands = [
         FlowDemand(src="en0:ssu0", dst="en5:ssu0", bits=_message_bits(cfg)),
-        FlowDemand(src="en1:ssu3", dst="en14:ssu2", bits=_message_bits(cfg)),
+        FlowDemand(src="en1:ssu3", dst="en6:ssu2", bits=_message_bits(cfg)),
     ]
 
     monkeypatch.setattr(metrics_module, "_should_use_exact_shortest_path_fast_path", lambda graph, mode: False)

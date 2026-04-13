@@ -840,34 +840,29 @@ def _compute_dor_backend_union_path(
 
         return tuple(nodes)
 
+    shape = _torus_exchange_grid_shape(g)
+    current_coord = _torus_exchange_coord(g, src_exchange)
+    dst_coord = _torus_exchange_coord(g, dst_exchange)
     if topology_kind == "2D-TORUS":
-        size = _torus_side_length(_exchange_count(g), dimensions=2)
-        current_coord = _exchange_to_coord_2d(src_exchange, size)
-        dst_coord = _exchange_to_coord_2d(dst_exchange, size)
         axes = (1, 0)
-        coord_to_exchange = lambda c: _coord_to_exchange_2d(c, size)
     else:
-        size = _torus_side_length(_exchange_count(g), dimensions=3)
-        current_coord = _exchange_to_coord_3d(src_exchange, size)
-        dst_coord = _exchange_to_coord_3d(dst_exchange, size)
         axes = (0, 1, 2)
-        coord_to_exchange = lambda c: _coord_to_exchange_3d(c, size)
 
     current_exchange = src_exchange
     current_union = f"{current_exchange}:{union_label}"
     nodes: list[str] = [current_union]
 
     for axis in axes:
-        signed_steps = _torus_signed_steps(current_coord[axis], dst_coord[axis], size)
+        signed_steps = _torus_signed_steps(current_coord[axis], dst_coord[axis], shape[axis])
         if signed_steps == 0:
             continue
 
         direction = 1 if signed_steps > 0 else -1
         for _ in range(abs(signed_steps)):
             next_coord = list(current_coord)
-            next_coord[axis] = (next_coord[axis] + direction) % size
+            next_coord[axis] = (next_coord[axis] + direction) % shape[axis]
             next_coord_tuple = tuple(next_coord)
-            next_exchange = coord_to_exchange(next_coord_tuple)
+            next_exchange = _torus_coord_to_exchange(g, next_coord_tuple)
             next_union = f"{next_exchange}:{union_label}"
             if not g.has_edge(current_union, next_union):
                 raise ValueError(
@@ -935,6 +930,44 @@ def _exchange_count(g: nx.Graph) -> int:
         if data.get("exchange_node_id") is not None
     }
     return len(exchanges)
+
+
+def _torus_exchange_grid_shape(g: nx.Graph) -> tuple[int, ...]:
+    shape = g.graph.get("torus_exchange_grid_shape")
+    if not shape:
+        raise ValueError("Torus graph is missing torus_exchange_grid_shape metadata")
+    return tuple(int(value) for value in shape)
+
+
+def _torus_exchange_coord(g: nx.Graph, exchange_id: str) -> tuple[int, ...]:
+    for _, data in g.nodes(data=True):
+        if str(data.get("exchange_node_id")) != exchange_id:
+            continue
+        coord = data.get("exchange_grid_coord")
+        if coord is not None:
+            return tuple(int(value) for value in coord)
+    raise ValueError(f"Exchange '{exchange_id}' is missing exchange_grid_coord metadata")
+
+
+def _torus_coord_to_exchange(g: nx.Graph, coord: tuple[int, ...]) -> str:
+    cache = g.graph.setdefault("_torus_coord_to_exchange_cache", {})
+    coord_map = cache.get("map")
+    if coord_map is None:
+        coord_map = {}
+        for node_id, data in g.nodes(data=True):
+            if data.get("node_role") != "union":
+                continue
+            exchange_id = data.get("exchange_node_id")
+            exchange_coord = data.get("exchange_grid_coord")
+            if exchange_id is None or exchange_coord is None:
+                continue
+            coord_map[tuple(int(value) for value in exchange_coord)] = str(exchange_id)
+        cache["map"] = coord_map
+
+    exchange_id = coord_map.get(tuple(int(value) for value in coord))
+    if exchange_id is None:
+        raise ValueError(f"Unknown torus exchange coord: {coord}")
+    return exchange_id
 
 
 def _is_single_plane_direct_torus(g: nx.Graph) -> bool:

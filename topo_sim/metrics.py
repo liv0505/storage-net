@@ -117,31 +117,33 @@ def _exchange_ids(g: nx.Graph) -> list[str]:
     )
 
 
-def _torus_side_length(exchange_count: int, dimensions: int) -> int:
-    if dimensions == 2:
-        size = int(round(exchange_count ** 0.5))
-    elif dimensions == 3:
-        size = int(round(exchange_count ** (1 / 3)))
-    else:
-        raise ValueError(f"Unsupported torus dimension count: {dimensions}")
-
-    if size <= 0 or size**dimensions != exchange_count:
-        raise ValueError(
-            f"Exchange count {exchange_count} does not form a {dimensions}D torus grid"
-        )
-    return size
+def _exchange_grid_coord(
+    g: nx.Graph,
+    exchange_id: str,
+) -> tuple[int, ...] | None:
+    for _, data in g.nodes(data=True):
+        if str(data.get("exchange_node_id")) != exchange_id:
+            continue
+        coord = data.get("exchange_grid_coord")
+        if coord is not None:
+            return tuple(int(value) for value in coord)
+    return None
 
 
-def _exchange_to_coord_3d(exchange_id: str, size: int) -> tuple[int, int, int]:
-    idx = int(exchange_id.removeprefix("en"))
-    x = idx // (size * size)
-    rem = idx % (size * size)
-    y = rem // size
-    z = rem % size
-    return x, y, z
+def _exchange_server_id(
+    g: nx.Graph,
+    exchange_id: str,
+) -> int | None:
+    for _, data in g.nodes(data=True):
+        if str(data.get("exchange_node_id")) != exchange_id:
+            continue
+        value = data.get("server_id")
+        if value is not None:
+            return int(value)
+    return None
 
 
-def _single_plane_torus_candidate_exchange_partitions(
+def _torus_candidate_exchange_partitions(
     g: nx.Graph,
     exchange_ids: list[str],
 ) -> list[frozenset[str]]:
@@ -152,10 +154,10 @@ def _single_plane_torus_candidate_exchange_partitions(
     normalized_shape = tuple(int(value) for value in grid_shape)
     exchange_coords: dict[str, tuple[int, ...]] = {}
     for exchange_id in exchange_ids:
-        coord = (g.nodes.get(f"{exchange_id}:union0") or {}).get("exchange_grid_coord")
+        coord = _exchange_grid_coord(g, exchange_id)
         if coord is None:
             return []
-        exchange_coords[exchange_id] = tuple(int(value) for value in coord)
+        exchange_coords[exchange_id] = coord
 
     half = len(exchange_ids) // 2
     partitions: list[frozenset[str]] = []
@@ -185,23 +187,10 @@ def _candidate_exchange_partitions(g: nx.Graph) -> list[frozenset[str]]:
     topology_kind = _infer_direct_topology_kind(g)
     half = exchange_count // 2
 
-    if topology_kind in {"2D-TORUS", "3D-TORUS"} and str(g.graph.get("direct_backend_mode", "")) == "single_plane":
-        partitions = _single_plane_torus_candidate_exchange_partitions(g, exchange_ids)
+    if topology_kind in {"2D-TORUS", "3D-TORUS"}:
+        partitions = _torus_candidate_exchange_partitions(g, exchange_ids)
         if partitions:
             return partitions
-
-    if topology_kind == "3D-TORUS" and exchange_count > 18:
-        size = _torus_side_length(exchange_count, dimensions=3)
-        midpoint = size // 2
-        partitions: list[frozenset[str]] = []
-        for axis in range(3):
-            side_a = {
-                exchange_id
-                for exchange_id in exchange_ids
-                if _exchange_to_coord_3d(exchange_id, size)[axis] < midpoint
-            }
-            partitions.append(frozenset(side_a))
-        return partitions
 
     if _is_df_topology(g):
         partitions = _df_candidate_exchange_partitions(g, exchange_ids, half)
@@ -225,7 +214,7 @@ def _df_candidate_exchange_partitions(
 ) -> list[frozenset[str]]:
     exchanges_by_server: dict[int, list[str]] = defaultdict(list)
     for exchange_id in exchange_ids:
-        server = _server_id(g, f"{exchange_id}:union0")
+        server = _exchange_server_id(g, exchange_id)
         if server is None:
             return []
         exchanges_by_server[server].append(exchange_id)
@@ -443,6 +432,26 @@ def _edge_capacity_bits_per_s(edge_data: dict[str, float], cfg: AnalysisConfig) 
     return max(bandwidth_gbps * 1e9, 1.0)
 
 
+def _parallel_link_count(edge_data: dict[str, float]) -> int:
+    return max(1, int(edge_data.get("parallel_links", 1)))
+
+
+def _physical_link_utilization_samples(
+    edge_data: dict[str, float],
+    offered_bits: float,
+    completion_time_s: float,
+    cfg: AnalysisConfig,
+) -> list[float]:
+    if completion_time_s <= 0:
+        return [0.0] * _parallel_link_count(edge_data)
+
+    parallel_links = _parallel_link_count(edge_data)
+    per_link_capacity_bps = _edge_capacity_bits_per_s(edge_data, cfg) / float(parallel_links)
+    per_link_offered_bits = float(offered_bits) / float(parallel_links)
+    utilization = per_link_offered_bits / (per_link_capacity_bps * completion_time_s)
+    return [float(utilization)] * parallel_links
+
+
 def _bits_to_gb(bits: float) -> float:
     return float(bits) / 8e9
 
@@ -514,7 +523,7 @@ def _should_use_direct_projection_fast_path(g: nx.Graph, routing_mode: str) -> b
     mode = normalize_routing_mode(routing_mode)
     if mode in {"DOR", "FULL_PATH"}:
         return _infer_direct_topology_kind(g) in {"2D-FULLMESH", "2D-TORUS", "3D-TORUS"}
-    if mode == "SHORTEST_PATH" and _is_single_plane_direct_torus(g):
+    if mode == "SHORTEST_PATH" and _infer_direct_topology_kind(g) in {"2D-TORUS", "3D-TORUS"}:
         return True
     return False
 
@@ -898,14 +907,16 @@ def _finalize_workload_details(
         if edge_data.get("link_kind") != "backend_interconnect":
             continue
 
-        capacity_bps = _edge_capacity_bits_per_s(edge_data, cfg)
         for src_node, dst_node in ((u, v), (v, u)):
             offered_bits = edge_load_bits.get(_edge_key(src_node, dst_node), 0.0)
-            if completion_time_s > 0:
-                utilization = offered_bits / (capacity_bps * completion_time_s)
-            else:
-                utilization = 0.0
-            backend_link_utilization.append(float(utilization))
+            backend_link_utilization.extend(
+                _physical_link_utilization_samples(
+                    edge_data,
+                    offered_bits,
+                    completion_time_s,
+                    cfg,
+                )
+            )
 
     max_link_utilization = float(max(backend_link_utilization) if backend_link_utilization else 0.0)
 

@@ -152,6 +152,7 @@ def test_dashboard_and_report_use_new_labels(output_dir: Path):
     assert "A2A Throughput" in html
     assert "data-topology-tab" in html
     assert "Theoretical Bandwidth:" in html
+    assert "2 x 400 Gbps" not in html
     assert "Total Carried Rate:" in html
     assert "Source SSU" in html
     assert "Destination SSU" in html
@@ -306,7 +307,7 @@ def test_dashboard_click_interaction_payload_includes_incident_bandwidth_labels(
     html = paths["html"].read_text(encoding="utf-8")
     assert "Click a node to highlight neighbors. Scroll to zoom, drag to pan, and double-click to reset." in html
     assert "incident_link_labels" in html
-    assert "bandwidth_gbps" in html
+    assert "bandwidth_label" in html
 
 def test_dashboard_uses_black_theme_and_interaction_hooks(output_dir: Path):
     cfg = AnalysisConfig(output_dir=output_dir)

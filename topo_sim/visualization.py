@@ -530,10 +530,11 @@ def _edge_path_points(
     edge_data: dict[str, Any],
     *,
     point_count: int = 13,
+    curve_bias: float = 0.0,
 ) -> list[tuple[float, float]]:
     x0, y0 = pos[u]
     x1, y1 = pos[v]
-    curve_factor = _edge_curve_factor(g, topology_name, u, v, edge_data)
+    curve_factor = _edge_curve_factor(g, topology_name, u, v, edge_data) + float(curve_bias)
     dx = x1 - x0
     dy = y1 - y0
     length = math.hypot(dx, dy)
@@ -568,6 +569,41 @@ def _edge_path_points(
     return points
 
 
+def _parallel_edge_curve_biases(edge_data: dict[str, Any]) -> list[float]:
+    parallel_links = max(1, int(edge_data.get("parallel_links", 1)))
+    if parallel_links <= 1:
+        return [0.0]
+
+    step = 0.085
+    midpoint = (parallel_links - 1) / 2.0
+    return [(index - midpoint) * step for index in range(parallel_links)]
+
+
+def _parallel_edge_paths(
+    g: nx.Graph,
+    pos: dict[Any, tuple[float, float]],
+    topology_name: str,
+    u: str,
+    v: str,
+    edge_data: dict[str, Any],
+    *,
+    point_count: int = 13,
+) -> list[list[tuple[float, float]]]:
+    return [
+        _edge_path_points(
+            g,
+            pos,
+            topology_name,
+            u,
+            v,
+            edge_data,
+            point_count=point_count,
+            curve_bias=curve_bias,
+        )
+        for curve_bias in _parallel_edge_curve_biases(edge_data)
+    ]
+
+
 def _path_midpoint(points: list[tuple[float, float]]) -> tuple[float, float]:
     if not points:
         return 0.0, 0.0
@@ -600,8 +636,8 @@ def _trace_from_edges(
     for u, v, data in g.edges(data=True):
         if data.get("link_kind") != link_kind:
             continue
-        points = _edge_path_points(g, pos, topology_name, str(u), str(v), data)
-        segments.append((_edge_draw_rank(g, topology_name, str(u), str(v)), points))
+        for points in _parallel_edge_paths(g, pos, topology_name, str(u), str(v), data):
+            segments.append((_edge_draw_rank(g, topology_name, str(u), str(v)), points))
 
     for _, points in sorted(segments, key=lambda item: item[0]):
         edge_x.extend([point[0] for point in points] + [None])
@@ -654,23 +690,26 @@ def _build_interaction_payload(
         label_items: list[dict[str, Any]] = []
         for neighbor in g.neighbors(node_id):
             edge_data = g.get_edge_data(node_id, neighbor) or {}
-            points = _edge_path_points(g, pos, topology_name, str(node_id), str(neighbor), edge_data)
-            edge_segments.append(
-                {
-                    "x": [point[0] for point in points] + [None],
-                    "y": [point[1] for point in points] + [None],
-                }
-            )
             bandwidth = float(edge_data.get("bandwidth_gbps", 0.0))
-            label_x, label_y = _path_midpoint(points)
-            label_items.append(
-                {
-                    "x": label_x,
-                    "y": label_y,
-                    "text": f"{bandwidth:.0f} Gbps",
-                    "bandwidth_gbps": bandwidth,
-                }
-            )
+            parallel_links = max(1, int(edge_data.get("parallel_links", 1)))
+            per_link_bandwidth_gbps = bandwidth / float(parallel_links)
+            bandwidth_label = f"{per_link_bandwidth_gbps:.0f} Gbps"
+            for points in _parallel_edge_paths(g, pos, topology_name, str(node_id), str(neighbor), edge_data):
+                edge_segments.append(
+                    {
+                        "x": [point[0] for point in points] + [None],
+                        "y": [point[1] for point in points] + [None],
+                    }
+                )
+                label_x, label_y = _path_midpoint(points)
+                label_items.append(
+                    {
+                        "x": label_x,
+                        "y": label_y,
+                        "text": bandwidth_label,
+                        "bandwidth_label": bandwidth_label,
+                    }
+                )
         incident_edges[node_id] = edge_segments
         incident_link_labels[node_id] = label_items
 
@@ -803,7 +842,7 @@ def _interaction_script(plot_id: str, payload: dict[str, Any]) -> str:
       x: [linkLabels.map((item) => item.x)],
       y: [linkLabels.map((item) => item.y)],
       text: [linkLabels.map((item) => item.text)],
-      customdata: [linkLabels.map((item) => item.bandwidth_gbps)]
+      customdata: [linkLabels.map((item) => item.bandwidth_label)]
     }}, [4]);
     Plotly.restyle(plot, {{
       x: [highlightPoints.map((item) => item.x)],
@@ -1138,13 +1177,17 @@ def _traffic_edge_traces(
         right = str(right)
         edge_data = g.get_edge_data(left, right) or {}
         bandwidth_gbps = float(edge_data.get("bandwidth_gbps", 0.0))
-        points = _edge_path_points(g, pos, topology_name, left, right, edge_data)
+        parallel_links = max(1, int(edge_data.get("parallel_links", 1)))
+        per_link_bandwidth_gbps = bandwidth_gbps / float(parallel_links)
+        bandwidth_label = f"{per_link_bandwidth_gbps:.0f} Gbps"
         forward_bits = float(edge_load_bits.get((left, right), 0.0))
         reverse_bits = float(edge_load_bits.get((right, left), 0.0))
-        forward_rate_gbps = (forward_bits / completion_time_s / 1e9) if completion_time_s > 0 else 0.0
-        reverse_rate_gbps = (reverse_bits / completion_time_s / 1e9) if completion_time_s > 0 else 0.0
-        forward_utilization = (forward_rate_gbps / bandwidth_gbps) if bandwidth_gbps > 0 else 0.0
-        reverse_utilization = (reverse_rate_gbps / bandwidth_gbps) if bandwidth_gbps > 0 else 0.0
+        per_link_forward_bits = forward_bits / float(parallel_links)
+        per_link_reverse_bits = reverse_bits / float(parallel_links)
+        forward_rate_gbps = (per_link_forward_bits / completion_time_s / 1e9) if completion_time_s > 0 else 0.0
+        reverse_rate_gbps = (per_link_reverse_bits / completion_time_s / 1e9) if completion_time_s > 0 else 0.0
+        forward_utilization = (forward_rate_gbps / per_link_bandwidth_gbps) if per_link_bandwidth_gbps > 0 else 0.0
+        reverse_utilization = (reverse_rate_gbps / per_link_bandwidth_gbps) if per_link_bandwidth_gbps > 0 else 0.0
         plane_index = int(g.nodes[left].get("df_plane_index", g.nodes[right].get("df_plane_index", 0)))
         draw_rank = plane_draw_order.get(plane_index, 0)
         if plane_count <= 1:
@@ -1152,25 +1195,27 @@ def _traffic_edge_traces(
         else:
             frontness = draw_rank / float(plane_count - 1)
             plane_opacity = 0.42 + (0.58 * frontness)
-        edge_payloads.append(
-            {
-                "left": left,
-                "right": right,
-                "x": [point[0] for point in points],
-                "y": [point[1] for point in points],
-                "bandwidth_gbps": bandwidth_gbps,
-                "forward_rate_gbps": forward_rate_gbps,
-                "reverse_rate_gbps": reverse_rate_gbps,
-                "forward_utilization_pct": forward_utilization * 100.0,
-                "reverse_utilization_pct": reverse_utilization * 100.0,
-                "forward_volume_gb": forward_bits / 8e9,
-                "reverse_volume_gb": reverse_bits / 8e9,
-                "total_rate_gbps": forward_rate_gbps + reverse_rate_gbps,
-                "line_width": 2.6 if edge_data.get("link_kind") == "backend_interconnect" else 2.1,
-                "draw_rank": draw_rank,
-                "plane_opacity": plane_opacity,
-            }
-        )
+        for points in _parallel_edge_paths(g, pos, topology_name, left, right, edge_data):
+            edge_payloads.append(
+                {
+                    "left": left,
+                    "right": right,
+                    "x": [point[0] for point in points],
+                    "y": [point[1] for point in points],
+                    "bandwidth_gbps": per_link_bandwidth_gbps,
+                    "bandwidth_label": bandwidth_label,
+                    "forward_rate_gbps": forward_rate_gbps,
+                    "reverse_rate_gbps": reverse_rate_gbps,
+                    "forward_utilization_pct": forward_utilization * 100.0,
+                    "reverse_utilization_pct": reverse_utilization * 100.0,
+                    "forward_volume_gb": per_link_forward_bits / 8e9,
+                    "reverse_volume_gb": per_link_reverse_bits / 8e9,
+                    "total_rate_gbps": forward_rate_gbps + reverse_rate_gbps,
+                    "line_width": 2.4 if edge_data.get("link_kind") == "backend_interconnect" else 2.0,
+                    "draw_rank": draw_rank,
+                    "plane_opacity": plane_opacity,
+                }
+            )
 
     edge_payloads.sort(key=lambda payload: payload["draw_rank"])
     max_total_rate_gbps = max(
@@ -1179,7 +1224,7 @@ def _traffic_edge_traces(
     )
     hover_template = (
         "Link: %{customdata[0]} <-> %{customdata[1]}"
-        "<br>Theoretical Bandwidth: %{customdata[2]:.0f} Gbps"
+        "<br>Theoretical Bandwidth: %{customdata[2]}"
         "<br>%{customdata[0]} -> %{customdata[1]} Carried Rate: %{customdata[3]:.2f} Gbps"
         "<br>%{customdata[1]} -> %{customdata[0]} Carried Rate: %{customdata[4]:.2f} Gbps"
         "<br>%{customdata[0]} -> %{customdata[1]} Utilization: %{customdata[5]:.1f}%"
@@ -1194,7 +1239,7 @@ def _traffic_edge_traces(
         custom_row = [
             payload["left"],
             payload["right"],
-            payload["bandwidth_gbps"],
+            payload["bandwidth_label"],
             payload["forward_rate_gbps"],
             payload["reverse_rate_gbps"],
             payload["forward_utilization_pct"],
@@ -1284,7 +1329,7 @@ def create_topology_figure(
         customdata=[],
         textposition="top center",
         textfont=dict(color="#ffd58f", size=11, family="Space Grotesk, Segoe UI, sans-serif"),
-        hovertemplate="%{customdata:.0f} Gbps<extra></extra>",
+        hovertemplate="%{customdata}<extra></extra>",
         showlegend=False,
         name="highlight-edge-labels",
     )
@@ -1531,7 +1576,7 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
                     "title": f"{display_workload_name(workload_name)} Directional Traffic",
                     "notes": [
                         "Hover any link to inspect theoretical bandwidth plus forward and reverse carried rate, utilization, and offered volume.",
-                        "Edge color encodes the sum of forward and reverse carried rate on that physical link.",
+                        "Edge color encodes the sum of forward and reverse carried rate on that link or parallel-link bundle.",
                         "Scroll to zoom, drag to pan, and double-click to reset the view.",
                         (
                             f"Completion {workload_metrics['completion_time_s'] * 1e3:.2f} ms | "

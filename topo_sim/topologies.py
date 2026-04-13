@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import math
 from typing import Callable, Iterator
 
 import networkx as nx
@@ -328,6 +329,80 @@ def _build_single_plane_3d_torus(cfg: AnalysisConfig) -> nx.Graph:
     return _annotate_graph(g, cfg)
 
 
+def _grid_coord_to_index(coord: tuple[int, ...], shape: tuple[int, ...]) -> int:
+    index = 0
+    stride = 1
+    for axis_size, axis_value in zip(reversed(shape), reversed(coord)):
+        index += int(axis_value) * stride
+        stride *= int(axis_size)
+    return index
+
+
+def _iter_grid_coords(shape: tuple[int, ...]) -> Iterator[tuple[int, ...]]:
+    if len(shape) == 2:
+        rows, cols = shape
+        for row in range(rows):
+            for col in range(cols):
+                yield (row, col)
+        return
+    if len(shape) == 3:
+        x_size, y_size, z_size = shape
+        for x in range(x_size):
+            for y in range(y_size):
+                for z in range(z_size):
+                    yield (x, y, z)
+        return
+    raise ValueError(f"Unsupported grid shape: {shape}")
+
+
+def _build_dual_plane_torus(
+    cfg: AnalysisConfig,
+    *,
+    topology_kind: str,
+    shape: tuple[int, ...],
+) -> nx.Graph:
+    if topology_kind not in {"2D-Torus", "3D-Torus"}:
+        raise ValueError(f"Unsupported torus topology kind: {topology_kind}")
+
+    g = nx.Graph()
+    exchanges: dict[tuple[int, ...], dict[str, list[str]]] = {}
+    axis_count = len(shape)
+
+    for coord in _iter_grid_coords(shape):
+        exchange_id = f"en{_grid_coord_to_index(coord, shape)}"
+        exchange = _add_exchange_node(g, exchange_id, cfg)
+        _set_exchange_grid_coord(g, exchange, coord)
+        exchanges[coord] = exchange
+
+    for union_index in range(2):
+        for coord in _iter_grid_coords(shape):
+            src_union = exchanges[coord]["unions"][union_index]
+            for axis in range(axis_count):
+                next_coord = list(coord)
+                next_coord[axis] = (next_coord[axis] + 1) % shape[axis]
+                dst_union = exchanges[tuple(next_coord)]["unions"][union_index]
+                parallel_links = 2 if int(shape[axis]) == 2 else 1
+                _add_backend_link(
+                    g,
+                    src_union,
+                    dst_union,
+                    topology_role=_torus_role_for_axis(
+                        topology_kind,
+                        axis,
+                        is_local_pair=False,
+                    ),
+                    bandwidth_gbps=_BACKEND_BW_GBPS * float(parallel_links),
+                    parallel_links=parallel_links,
+                )
+
+    g.graph["direct_backend_mode"] = "dual_plane"
+    g.graph["direct_plane_count"] = 2
+    g.graph["logical_plane_union_count"] = math.prod(shape) * 2
+    g.graph["logical_plane_ssu_count"] = math.prod(shape) * 8
+    g.graph["torus_exchange_grid_shape"] = tuple(int(value) for value in shape)
+    return _annotate_graph(g, cfg)
+
+
 def _add_df_server_fullmesh_links(g: nx.Graph, union_ids: list[str]) -> None:
     for src_index, src_union_id in enumerate(union_ids):
         for dst_union_id in union_ids[src_index + 1 :]:
@@ -629,41 +704,19 @@ def build_2d_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
 
 
 def build_2d_torus(cfg: AnalysisConfig) -> nx.Graph:
-    g = nx.Graph()
-    rows = 4
-    cols = 4
-    exchanges: dict[tuple[int, int], dict[str, list[str]]] = {}
-
-    for r in range(rows):
-        for c in range(cols):
-            exchange_id = f"en{r * cols + c}"
-            exchanges[(r, c)] = _add_exchange_node(g, exchange_id, cfg)
-
-    for union_index in range(2):
-        for r in range(rows):
-            for c in range(cols):
-                _add_backend_link(
-                    g,
-                    exchanges[(r, c)]["unions"][union_index],
-                    exchanges[(r, (c + 1) % cols)]["unions"][union_index],
-                    topology_role="2d_torus_x",
-                )
-                _add_backend_link(
-                    g,
-                    exchanges[(r, c)]["unions"][union_index],
-                    exchanges[((r + 1) % rows, c)]["unions"][union_index],
-                    topology_role="2d_torus_y",
-                )
-
-    g.graph["direct_backend_mode"] = "dual_plane"
-    g.graph["direct_plane_count"] = 2
-    g.graph["logical_plane_union_count"] = rows * cols * 2
-    g.graph["logical_plane_ssu_count"] = rows * cols * 8
-    return _annotate_graph(g, cfg)
+    return _build_dual_plane_torus(
+        cfg,
+        topology_kind="2D-Torus",
+        shape=(2, 4),
+    )
 
 
 def build_3d_torus(cfg: AnalysisConfig) -> nx.Graph:
-    return _build_single_plane_3d_torus(cfg)
+    return _build_dual_plane_torus(
+        cfg,
+        topology_kind="3D-Torus",
+        shape=(2, 4, 4),
+    )
 
 
 def build_clos(cfg: AnalysisConfig) -> nx.Graph:

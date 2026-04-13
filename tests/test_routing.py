@@ -146,15 +146,15 @@ def test_3d_torus_shortest_path_differs_from_dor():
 
     assert len(dor_paths) == 2
     assert {tuple(_backend_roles_for_path(g, path.nodes)) for path in dor_paths} == {
-        ("3d_torus_x", "3d_torus_x", "3d_torus_y", "3d_torus_y", "3d_torus_z"),
+        ("3d_torus_x", "3d_torus_y", "3d_torus_z"),
     }
     assert {round(path.weight, 8) for path in dor_paths} == {0.5}
 
-    assert len(shortest_paths) == 240
+    assert len(shortest_paths) == 12
     assert {tuple(sorted(_backend_roles_for_path(g, path.nodes))) for path in shortest_paths} == {
-        ("3d_torus_x", "3d_torus_x", "3d_torus_y", "3d_torus_y", "3d_torus_z"),
+        ("3d_torus_x", "3d_torus_y", "3d_torus_z"),
     }
-    assert {round(path.weight, 8) for path in shortest_paths} == {round(1.0 / 240.0, 8)}
+    assert {round(path.weight, 8) for path in shortest_paths} == {round(1.0 / 12.0, 8)}
 
 
 def test_full_path_uses_all_available_egress_ports_across_both_planes():
@@ -394,5 +394,5 @@ def test_compute_paths_returns_empty_list_when_disconnected(routing_mode: str):
         if data.get("link_kind") == "backend_interconnect":
             g.remove_edge(u, v)
 
-    paths = compute_paths(g, "en0:ssu0", "en15:ssu0", routing_mode=routing_mode, cfg=AnalysisConfig())
+    paths = compute_paths(g, "en0:ssu0", "en7:ssu0", routing_mode=routing_mode, cfg=AnalysisConfig())
     assert paths == []

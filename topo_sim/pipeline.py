@@ -250,12 +250,18 @@ def _topology_scale(name: str, g: nx.Graph) -> str:
         logical_unions = int(g.graph.get("logical_plane_union_count", 0))
         logical_ssus = int(g.graph.get("logical_plane_ssu_count", 0))
         plane_count = int(g.graph.get("direct_plane_count", 1))
-        plane_label = "single torus plane" if plane_count == 1 else f"{plane_count} torus planes"
+        exchange_shape = tuple(int(value) for value in g.graph.get("torus_exchange_grid_shape", ()))
+        shape_label = " x ".join(str(value) for value in exchange_shape) if exchange_shape else "torus"
+        plane_label = "single torus plane" if plane_count == 1 else f"{plane_count} independent {shape_label} torus planes"
         return f"{plane_label} | {logical_unions} Union | {logical_ssus} SSU"
     if name == "3D-Torus":
         logical_unions = int(g.graph.get("logical_plane_union_count", 0))
         logical_ssus = int(g.graph.get("logical_plane_ssu_count", 0))
-        return f"single torus plane | {logical_unions} Union | {logical_ssus} SSU"
+        plane_count = int(g.graph.get("direct_plane_count", 1))
+        exchange_shape = tuple(int(value) for value in g.graph.get("torus_exchange_grid_shape", ()))
+        shape_label = " x ".join(str(value) for value in exchange_shape) if exchange_shape else "torus"
+        plane_label = "single torus plane" if plane_count == 1 else f"{plane_count} independent {shape_label} torus planes"
+        return f"{plane_label} | {logical_unions} Union | {logical_ssus} SSU"
     if _is_df_name(name):
         plane_count = int(g.graph.get("df_plane_count", 1))
         server_count = int(g.graph.get("df_server_count", 0))
@@ -276,11 +282,11 @@ def _topology_pattern(name: str, g: nx.Graph, cfg: AnalysisConfig) -> str:
         )
     if name == "2D-Torus":
         return (
-            "Each Union uses 4 backend ports on its own 4x4 torus plane, and the two Union chips inside each exchange node stay on two independent torus planes rather than coupling together locally."
+            "Each Union uses 4 backend ports on one 2x4 torus plane, and the two Union chips inside each exchange node belong to two independent torus planes with no Union-to-Union local bridge."
         )
     if name == "3D-Torus":
         return (
-            "Each Union uses 6 backend ports on one 4x4x4 torus of Union chips, and the in-group Union-to-Union link is one of the torus Z-direction edges rather than an extra local link."
+            "Each Union uses 6 backend ports on one 2x4x4 torus plane, and the two Union chips inside each exchange node belong to two independent torus planes with no Union-to-Union local bridge."
         )
     if _is_df_name(name):
         local_ports = int(g.graph.get("df_local_ports_per_union", 0))
@@ -423,11 +429,11 @@ def _routing_configuration(name: str, cfg: AnalysisConfig) -> dict[str, Any]:
         )
     elif name == "2D-Torus":
         notes.append(
-            "the two Union chips inside each exchange node belong to two independent 4x4 torus planes, so routing evaluates the two planes separately"
+            "the two Union chips inside each exchange node belong to two independent 2x4 torus planes, so routing evaluates the two planes separately"
         )
     elif name == "3D-Torus":
         notes.append(
-            "the two Union chips inside each exchange node are locally coupled into one connected torus backend, so routing can enter the torus through either Union"
+            "the two Union chips inside each exchange node belong to two independent 2x4x4 torus planes, so routing evaluates the two planes separately"
         )
     if mode == "DOR":
         if name == "2D-Torus":

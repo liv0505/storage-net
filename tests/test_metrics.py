@@ -1,4 +1,5 @@
-﻿import pytest
+﻿import networkx as nx
+import pytest
 
 from topo_sim.config import AnalysisConfig
 from topo_sim.metrics import compute_structural_metrics, evaluate_workload, evaluate_workload_with_details
@@ -22,7 +23,7 @@ def test_structural_metrics_use_backend_only_balanced_bisection_bandwidth():
     g = build_topology("2D-Torus", AnalysisConfig())
     metrics = compute_structural_metrics(g)
 
-    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(6400.0)
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(3200.0)
     assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(100.0)
 
 
@@ -99,6 +100,48 @@ def test_backend_utilization_metrics_ignore_internal_only_routes():
     assert result["link_utilization_cv"] == 0.0
     assert result["completion_time_p50_s"] >= 0
     assert result["completion_time_p95_s"] >= 0
+
+
+def test_link_utilization_cv_counts_parallel_links_as_separate_physical_samples():
+    cfg = AnalysisConfig()
+    g = nx.Graph()
+
+    for exchange_id in ("en0", "en1", "en2", "en3"):
+        g.add_node(f"{exchange_id}:union0", node_role="union", exchange_node_id=exchange_id)
+        g.add_node(f"{exchange_id}:ssu0", node_role="ssu", exchange_node_id=exchange_id)
+
+    for exchange_id in ("en0", "en1", "en2", "en3"):
+        g.add_edge(
+            f"{exchange_id}:ssu0",
+            f"{exchange_id}:union0",
+            link_kind="internal_ssu_uplink",
+            bandwidth_gbps=200.0,
+        )
+
+    g.add_edge(
+        "en0:union0",
+        "en1:union0",
+        link_kind="backend_interconnect",
+        bandwidth_gbps=800.0,
+        parallel_links=2,
+    )
+    g.add_edge(
+        "en2:union0",
+        "en3:union0",
+        link_kind="backend_interconnect",
+        bandwidth_gbps=400.0,
+        parallel_links=1,
+    )
+
+    result = evaluate_workload(
+        g,
+        [FlowDemand(src="en0:ssu0", dst="en1:ssu0", bits=200_000_000_000.0)],
+        routing_mode="ECMP",
+        cfg=cfg,
+    )
+
+    assert result["max_link_utilization"] == pytest.approx(0.25)
+    assert result["link_utilization_cv"] == pytest.approx(2 ** 0.5)
 
 
 def test_completion_time_uses_directional_edge_loads():
