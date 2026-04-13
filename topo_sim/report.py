@@ -10,7 +10,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from .labels import display_workload_name
+from .labels import display_topology_name, display_workload_name
 
 
 PAGE_BG = colors.HexColor("#020617")
@@ -225,7 +225,9 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
     story.append(Spacer(1, 5))
     story.append(
         Paragraph(
-            "This report follows the same dark, topology-first presentation as the HTML dashboard. It compares 2D-FullMesh, 2D-Torus, 3D-Torus, and Clos under the shared 8 SSU + 2 Union exchange-node model.",
+            "This report follows the same dark, topology-first presentation as the HTML dashboard. "
+            f"It compares the selected topologies under the shared 8 SSU + 2 Union exchange-node model: "
+            f"{', '.join(display_topology_name(item['name']) for item in results)}.",
             styles["Body"],
         )
     )
@@ -244,7 +246,7 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
     for item in results:
         summary_rows.append(
             [
-                item["name"],
+                display_topology_name(item["name"]),
                 _fmt_value(item["structural_metrics"]["diameter"]),
                 _fmt_value(item["structural_metrics"]["average_hops"]),
                 _fmt_value(item["structural_metrics"]["bisection_bandwidth_gbps"]),
@@ -257,7 +259,7 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
     story.append(Spacer(1, 10))
 
     for item in results:
-        story.append(Paragraph(item["name"], styles["Heading"]))
+        story.append(Paragraph(display_topology_name(item["name"]), styles["Heading"]))
         story.append(
             Paragraph(
                 "Topology figure stays first in the HTML dashboard; the PDF mirrors that hierarchy with compact configuration and routing tables before the smaller observation notes.",

@@ -17,7 +17,9 @@ def test_available_topologies_only_exposes_new_names():
     assert available_topologies() == [
         "2D-FullMesh",
         "2D-Torus",
+        "2D-Torus-BestTwist",
         "3D-Torus",
+        "3D-Torus-BestTwist",
         "Clos",
         "DF",
         "DF-Shuffled",
@@ -384,7 +386,9 @@ def test_df_variants_share_ssus_across_two_backend_plane_components(
     [
         ("2D-FullMesh", 128, 32, 256, 96),
         ("2D-Torus", 64, 16, 128, 32),
+        ("2D-Torus-BestTwist", 64, 16, 128, 32),
         ("3D-Torus", 256, 64, 512, 192),
+        ("3D-Torus-BestTwist", 256, 64, 512, 192),
         ("Clos", 144, 36, 288, 144),
         ("DF", 416, 104, 832, 312),
         ("DF-Shuffled", 416, 104, 832, 312),

@@ -50,6 +50,8 @@ def compute_paths(
     cfg: AnalysisConfig,
 ) -> list[RoutedPath]:
     mode = normalize_routing_mode(routing_mode)
+    if mode == "DOR" and bool(g.graph.get("torus_twisted", False)):
+        mode = "SHORTEST_PATH"
 
     if src_ssu not in g or dst_ssu not in g:
         return []

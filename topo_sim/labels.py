@@ -7,6 +7,8 @@ _WORKLOAD_DISPLAY_NAMES = {
 }
 
 _TOPOLOGY_DISPLAY_NAMES = {
+    "2D-Torus-BestTwist": "2D-Torus Best Twist",
+    "3D-Torus-BestTwist": "3D-Torus Best Twist",
     "DF": "Dragon-Fly",
     "DF-Shuffled": "Dragon-Fly Shuffled",
     "DF-ScaleUp": "Dragon-Fly Scale-Up",

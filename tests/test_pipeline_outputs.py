@@ -236,6 +236,18 @@ def test_dashboard_includes_routing_diversity_snapshot(output_dir: Path):
     assert "SHORTEST_PATH vs DOR" in html
 
 
+def test_best_twist_torus_appears_in_dashboard_without_dor(output_dir: Path):
+    cfg = AnalysisConfig(output_dir=output_dir, routing_mode="SHORTEST_PATH")
+    paths = run_full_analysis(cfg, ["2D-Torus-BestTwist"])
+
+    html = paths["html"].read_text(encoding="utf-8")
+    assert "2D-Torus Best Twist" in html
+    assert "axis0=[0, 2] | axis1=[0, 0]" in html
+    assert "SHORTEST_PATH" in html
+    assert "FULL_PATH" in html
+    assert "SHORTEST_PATH vs DOR" not in html
+
+
 def test_direct_topology_outputs_compact_routing_comparison_sections(output_dir: Path):
     cfg = AnalysisConfig(output_dir=output_dir, routing_mode="DOR")
     paths = run_full_analysis(cfg, ["2D-Torus"])

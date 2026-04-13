@@ -10,7 +10,15 @@ from topo_sim.config import AnalysisConfig
 
 def test_analysis_config_defaults_match_ssu_design():
     cfg = AnalysisConfig()
-    assert cfg.topology_names == ["2D-FullMesh", "2D-Torus", "3D-Torus", "Clos", "DF"]
+    assert cfg.topology_names == [
+        "2D-FullMesh",
+        "2D-Torus",
+        "2D-Torus-BestTwist",
+        "3D-Torus",
+        "3D-Torus-BestTwist",
+        "Clos",
+        "DF",
+    ]
     assert cfg.sparse_active_ratio == 0.25
     assert cfg.sparse_target_count == 2
     assert cfg.port_balanced_max_detour_hops == 1
@@ -44,6 +52,15 @@ def test_parse_args_accepts_df_topology(monkeypatch):
     monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "DF"])
     args = parse_args()
     assert args.topologies == "DF"
+
+
+def test_parse_args_accepts_best_twist_torus_variants(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["main.py", "--topologies", "2D-Torus-BestTwist,3D-Torus-BestTwist"],
+    )
+    args = parse_args()
+    assert args.topologies == "2D-Torus-BestTwist,3D-Torus-BestTwist"
 
 
 def test_parse_args_accepts_df_variants(monkeypatch):

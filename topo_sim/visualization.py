@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .labels import display_topology_name, display_workload_name
+from .topologies import is_torus_topology_name, torus_base_name
 
 
 _INTERNAL_EDGE_COLOR = "rgba(92, 108, 136, 0.22)"
@@ -29,6 +30,14 @@ _PLOT_BG_COLOR = "#000000"
 def _is_df_name(topology_name: str) -> bool:
     upper = str(topology_name).strip().upper()
     return upper == "DF" or upper.startswith("DF-")
+
+
+def _is_torus_name(topology_name: str) -> bool:
+    return is_torus_topology_name(topology_name)
+
+
+def _torus_family_name(topology_name: str) -> str | None:
+    return torus_base_name(topology_name)
 
 
 def _fallback_positions(g: nx.Graph) -> dict[Any, tuple[float, float]]:
@@ -341,9 +350,9 @@ def _exchange_grid_positions_df(g: nx.Graph) -> dict[str, tuple[float, float]]:
 def _explicit_positions(topology_name: str, g: nx.Graph) -> dict[Any, tuple[float, float]] | None:
     if topology_name == "2D-FullMesh":
         return _exchange_grid_positions_2d(4, 4)
-    if topology_name == "2D-Torus":
+    if _torus_family_name(topology_name) == "2D-Torus":
         return _exchange_grid_positions_2d_torus(g)
-    if topology_name == "3D-Torus":
+    if _torus_family_name(topology_name) == "3D-Torus":
         return _exchange_grid_positions_3d_torus(g)
     if topology_name == "Clos":
         return _exchange_grid_positions_clos(g)
@@ -498,15 +507,15 @@ def _edge_curve_factor(
         parity_sign = -1.0 if ((src_local + dst_local) % 2 == 0) else 1.0
         return 0.12 * parity_sign
 
-    if topology_name == "2D-Torus" and topology_role in {"2d_torus_x", "2d_torus_y"}:
+    if _torus_family_name(topology_name) == "2D-Torus" and topology_role in {"2d_torus_x", "2d_torus_y"}:
         union_plane = int(g.nodes[u].get("local_index", 0))
         plane_sign = -1.0 if union_plane == 0 else 1.0
         axis_curve = 0.12 if topology_role.endswith("_x") else -0.12
         return plane_sign * axis_curve
-    if topology_name == "2D-Torus" and topology_role == "2d_torus_local":
+    if _torus_family_name(topology_name) == "2D-Torus" and topology_role == "2d_torus_local":
         return 0.14
 
-    if topology_name == "3D-Torus" and topology_role in {"3d_torus_x", "3d_torus_y", "3d_torus_z"}:
+    if _torus_family_name(topology_name) == "3D-Torus" and topology_role in {"3d_torus_x", "3d_torus_y", "3d_torus_z"}:
         union_plane = int(g.nodes[u].get("local_index", 0))
         plane_sign = -1.0 if union_plane == 0 else 1.0
         axis_curve = {
@@ -515,7 +524,7 @@ def _edge_curve_factor(
             "3d_torus_z": 0.15,
         }[topology_role]
         return plane_sign * axis_curve
-    if topology_name == "3D-Torus" and topology_role == "3d_torus_local":
+    if _torus_family_name(topology_name) == "3D-Torus" and topology_role == "3d_torus_local":
         return 0.12
 
     return 0.0
@@ -724,7 +733,7 @@ def _build_interaction_payload(
 
 def _layout_notes(topology_name: str) -> list[str]:
     base_note = "SSUs stay on the bottom row and Unions sit on the layer above inside each exchange node."
-    if topology_name == "3D-Torus":
+    if _torus_family_name(topology_name) == "3D-Torus":
         return [base_note, "Exchange nodes are grouped into paired z-layers, each rendered as one 4x4 plane block."]
     if topology_name == "Clos":
         return [base_note, "Clos spine layer sits above the exchange-node Union layer for structured two-level viewing."]
@@ -1448,8 +1457,8 @@ def _join_display_names(names: list[str]) -> str:
     if len(names) == 1:
         return names[0]
     if len(names) == 2:
-        return f"{names[0]} and {names[1]}"
-    return ", ".join(names[:-1]) + f", and {names[-1]}"
+        return f"{names[0]}和{names[1]}"
+    return "、".join(names[:-1]) + f"和{names[-1]}"
 
 
 def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -1478,10 +1487,6 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
         if float(item["communication_metrics"]["A2A"]["max_link_utilization"]) < 0.995
     ]
 
-    best_a2a_balance = min(
-        results,
-        key=lambda item: float(item["communication_metrics"]["A2A"]["link_utilization_cv"]),
-    )
     worst_a2a_balance = max(
         results,
         key=lambda item: float(item["communication_metrics"]["A2A"]["link_utilization_cv"]),
@@ -1490,6 +1495,31 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
         results,
         key=lambda item: float(item["communication_metrics"]["Sparse 1-to-N"]["link_utilization_cv"]),
     )
+    near_zero_cv_topologies = [
+        item["display_name"]
+        for item in results
+        if float(item["communication_metrics"]["A2A"]["link_utilization_cv"]) <= 1e-6
+    ]
+
+    result_by_name = {str(item["name"]): item for item in results}
+    twist_effect_rows: list[str] = []
+    for base_name, twist_name in (
+        ("2D-Torus", "2D-Torus-BestTwist"),
+        ("3D-Torus", "3D-Torus-BestTwist"),
+    ):
+        base_item = result_by_name.get(base_name)
+        twist_item = result_by_name.get(twist_name)
+        if base_item is None or twist_item is None:
+            continue
+
+        base_a2a = base_item["communication_metrics"]["A2A"]
+        twist_a2a = twist_item["communication_metrics"]["A2A"]
+        twist_effect_rows.append(
+            f"{display_topology_name(base_name)} 从 CV {base_a2a['link_utilization_cv']:.3f} "
+            f"降到 {twist_a2a['link_utilization_cv']:.3f}，A2A 吞吐从 "
+            f"{base_a2a['per_ssu_throughput_gbps']:.0f} 提升到 "
+            f"{twist_a2a['per_ssu_throughput_gbps']:.0f} Gbps"
+        )
 
     top_a2a = a2a_sorted[0]
     runner_up_a2a = a2a_sorted[1] if len(a2a_sorted) > 1 else a2a_sorted[0]
@@ -1498,44 +1528,44 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
 
     return [
         {
-            "title": "A2A Throughput",
+            "title": "A2A 性能",
             "body": (
-                f"{top_a2a['display_name']} leads all-to-all throughput at "
-                f"{top_a2a['communication_metrics']['A2A']['per_ssu_throughput_gbps']:.0f} Gbps/SSU, "
-                f"with {runner_up_a2a['display_name']} next at "
-                f"{runner_up_a2a['communication_metrics']['A2A']['per_ssu_throughput_gbps']:.0f} Gbps/SSU. "
-                "A2A exposes backend width, path diversity, and machine-wide cut pressure most directly."
+                f"A2A 下，{top_a2a['display_name']} 的每 SSU 吞吐最高，为 "
+                f"{top_a2a['communication_metrics']['A2A']['per_ssu_throughput_gbps']:.0f} Gbps；"
+                f"{runner_up_a2a['display_name']} 次之，为 "
+                f"{runner_up_a2a['communication_metrics']['A2A']['per_ssu_throughput_gbps']:.0f} Gbps。"
+                "A2A 最能体现后端总带宽、路径多样性和全局对分压力。"
+                "从这组结果看，Best Twist 的价值主要体现在 A2A：它通过重排 wrap 边界来降低热点、提升均衡度。"
             ),
         },
         {
-            "title": "Sparse M-to-N",
+            "title": "稀疏 M-to-N",
             "body": (
-                f"{top_sparse['display_name']} remains best under sparse traffic at "
-                f"{top_sparse['communication_metrics']['Sparse 1-to-N']['per_ssu_throughput_gbps']:.0f} Gbps/SSU, "
-                f"followed by {runner_up_sparse['display_name']}. "
-                "The gap narrows versus A2A because fewer concurrent flows cross the global cut, "
-                "so localized traffic benefits more from short local segments."
+                f"稀疏 M-to-N 下，{top_sparse['display_name']} 的每 SSU 吞吐最高，为 "
+                f"{top_sparse['communication_metrics']['Sparse 1-to-N']['per_ssu_throughput_gbps']:.0f} Gbps；"
+                f"{runner_up_sparse['display_name']} 紧随其后。"
+                "相比 A2A，这一场景跨全局割面的并发流更少，所以不同拓扑之间的差距通常会缩小。"
+                "因此 Best Twist 在这一部分更多体现为缓解局部热点，未必会带来同等幅度的吞吐提升。"
             ),
         },
         {
-            "title": "Why Some Links Hit 100%",
+            "title": "为什么有的链路到 100%",
             "body": (
-                f"A2A backend utilization reaches 100% in {_join_display_names(a2a_backend_limited)}, "
-                "so those fabrics are backend-limited under all-to-all. "
-                f"It stays below 100% in {_join_display_names(a2a_not_backend_limited)}, "
-                "which usually means completion is capped by non-backend segments such as the 200 Gbps SSU-Union access links."
+                f"A2A 下，{_join_display_names(a2a_backend_limited)} 的后端最大利用率达到 100%，"
+                "说明这些拓扑的瓶颈就在后端互连"
+                f"{'；' if a2a_not_backend_limited else '。'}"
+                f"{f'{_join_display_names(a2a_not_backend_limited)} 未到 100%，通常说明瓶颈更多落在非后端链路，例如 200G 的 SSU-Union 接入链路。' if a2a_not_backend_limited else ''}"
             ),
         },
         {
-            "title": "Load Balance And Hotspots",
+            "title": "均衡度与热点",
             "body": (
-                f"Lower utilization CV means more even backend loading. "
-                f"{best_a2a_balance['display_name']} is the most even under A2A "
-                f"(CV {best_a2a_balance['communication_metrics']['A2A']['link_utilization_cv']:.3f}), "
-                f"while {worst_a2a_balance['display_name']} is the least even "
-                f"(CV {worst_a2a_balance['communication_metrics']['A2A']['link_utilization_cv']:.3f}). "
-                f"Under Sparse M-to-N, {worst_sparse_balance['display_name']} shows the strongest concentration, "
-                "which is consistent with weaker path diversity or more server-pair hotspotting."
+                "Twist 的核心不是增加带宽，而是重排 torus 的 wrap 边连接关系，把原本集中在少数边界链路上的流量打散到更多链路上。"
+                f"{'从当前结果看，' + '；'.join(twist_effect_rows) + '。' if twist_effect_rows else ''}"
+                f"A2A 下，CV 接近 0 的并不只有一个拓扑，当前达到近似 0 的有 {_join_display_names(near_zero_cv_topologies)}；"
+                f"{worst_a2a_balance['display_name']} 的不均衡最明显 "
+                f"(CV {worst_a2a_balance['communication_metrics']['A2A']['link_utilization_cv']:.3f})。"
+                f"稀疏 M-to-N 下，{worst_sparse_balance['display_name']} 的流量集中度最高，更容易出现局部热点。"
             ),
         },
     ]

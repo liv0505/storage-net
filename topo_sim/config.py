@@ -7,7 +7,15 @@ class AnalysisConfig:
     """Configuration for topology modeling and simulation."""
 
     topology_names: list[str] = field(
-        default_factory=lambda: ["2D-FullMesh", "2D-Torus", "3D-Torus", "Clos", "DF"]
+        default_factory=lambda: [
+            "2D-FullMesh",
+            "2D-Torus",
+            "2D-Torus-BestTwist",
+            "3D-Torus",
+            "3D-Torus-BestTwist",
+            "Clos",
+            "DF",
+        ]
     )
     routing_mode: str = "SHORTEST_PATH"
     sparse_active_ratio: float = 0.25

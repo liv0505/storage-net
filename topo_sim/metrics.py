@@ -520,6 +520,8 @@ def _should_use_exact_shortest_path_fast_path(g: nx.Graph, routing_mode: str) ->
 
 
 def _should_use_direct_projection_fast_path(g: nx.Graph, routing_mode: str) -> bool:
+    if bool(g.graph.get("torus_twisted", False)):
+        return False
     mode = normalize_routing_mode(routing_mode)
     if mode in {"DOR", "FULL_PATH"}:
         return _infer_direct_topology_kind(g) in {"2D-FULLMESH", "2D-TORUS", "3D-TORUS"}
