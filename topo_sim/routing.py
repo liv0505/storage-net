@@ -50,7 +50,9 @@ def compute_paths(
     cfg: AnalysisConfig,
 ) -> list[RoutedPath]:
     mode = normalize_routing_mode(routing_mode)
-    if mode == "DOR" and bool(g.graph.get("torus_twisted", False)):
+    if mode == "DOR" and (bool(g.graph.get("torus_twisted", False)) or _is_sparsemesh_topology(g)):
+        mode = "SHORTEST_PATH"
+    if mode == "ECMP" and _is_sparsemesh_topology(g):
         mode = "SHORTEST_PATH"
 
     if src_ssu not in g or dst_ssu not in g:
@@ -170,7 +172,7 @@ def _compute_dor_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPa
 
 
 def _compute_dual_plane_shortest_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPath]:
-    if _infer_direct_topology_kind(g) is None:
+    if _infer_direct_topology_kind(g) is None and not _is_sparsemesh_topology(g):
         return _compute_ecmp_paths(g, src_ssu, dst_ssu)
 
     src_exchange = _exchange_id(src_ssu)
@@ -188,7 +190,7 @@ def _compute_dual_plane_shortest_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) 
 
 
 def _compute_dual_plane_full_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPath]:
-    if _infer_direct_topology_kind(g) is None:
+    if _infer_direct_topology_kind(g) is None and not _is_sparsemesh_topology(g):
         return _compute_dual_plane_shortest_paths(g, src_ssu, dst_ssu)
 
     src_exchange = _exchange_id(src_ssu)
@@ -899,6 +901,14 @@ def _is_df_topology(g: nx.Graph) -> bool:
         return True
     topology_name = str(g.graph.get("topology_name", "")).upper()
     return topology_name == "DF" or topology_name.startswith("DF-")
+
+
+def _is_sparsemesh_topology(g: nx.Graph) -> bool:
+    family = str(g.graph.get("topology_family", "")).upper()
+    if family == "SPARSEMESH":
+        return True
+    topology_name = str(g.graph.get("topology_name", "")).upper()
+    return topology_name.startswith("SPARSEMESH")
 
 
 def _source_union_ids(g: nx.Graph, src_ssu: str) -> list[str]:

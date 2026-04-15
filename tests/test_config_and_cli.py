@@ -18,6 +18,8 @@ def test_analysis_config_defaults_match_ssu_design():
         "3D-Torus-BestTwist",
         "Clos",
         "DF",
+        "SparseMesh-Local",
+        "SparseMesh-Global",
     ]
     assert cfg.sparse_active_ratio == 0.25
     assert cfg.sparse_target_count == 2
@@ -67,6 +69,15 @@ def test_parse_args_accepts_df_variants(monkeypatch):
     monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "DF-Shuffled,DF-ScaleUp"])
     args = parse_args()
     assert args.topologies == "DF-Shuffled,DF-ScaleUp"
+
+
+def test_parse_args_accepts_sparsemesh_variants(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["main.py", "--topologies", "SparseMesh-Local,SparseMesh-Global"],
+    )
+    args = parse_args()
+    assert args.topologies == "SparseMesh-Local,SparseMesh-Global"
 
 
 def test_parse_args_accepts_2p_df_variants(monkeypatch):

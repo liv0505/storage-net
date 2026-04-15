@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .labels import display_topology_name, display_workload_name
-from .topologies import is_torus_topology_name, torus_base_name
+from .topologies import is_sparsemesh_topology_name, is_torus_topology_name, torus_base_name
 
 
 _INTERNAL_EDGE_COLOR = "rgba(92, 108, 136, 0.22)"
@@ -38,6 +38,10 @@ def _is_torus_name(topology_name: str) -> bool:
 
 def _torus_family_name(topology_name: str) -> str | None:
     return torus_base_name(topology_name)
+
+
+def _is_sparsemesh_name(topology_name: str) -> bool:
+    return is_sparsemesh_topology_name(topology_name)
 
 
 def _fallback_positions(g: nx.Graph) -> dict[Any, tuple[float, float]]:
@@ -347,6 +351,41 @@ def _exchange_grid_positions_df(g: nx.Graph) -> dict[str, tuple[float, float]]:
     return positions
 
 
+def _exchange_grid_positions_sparsemesh(g: nx.Graph) -> dict[str, tuple[float, float]]:
+    positions: dict[str, tuple[float, float]] = {}
+    exchange_ids = sorted(
+        {
+            str(data.get("exchange_node_id"))
+            for _, data in g.nodes(data=True)
+            if data.get("exchange_node_id") is not None
+        },
+        key=lambda value: int(value.removeprefix("en")),
+    )
+    exchange_count = len(exchange_ids)
+    if exchange_count == 0:
+        return positions
+
+    radius = max(40.0, exchange_count * 1.08)
+    for index, exchange_id in enumerate(exchange_ids):
+        angle = -2.0 * math.pi * (index / float(exchange_count))
+        radial = (math.cos(angle), math.sin(angle))
+        tangent = (-radial[1], radial[0])
+        inward = (-radial[0], -radial[1])
+        center_x = radius * radial[0]
+        center_y = radius * radial[1]
+        positions.update(
+            _oriented_df_exchange_local_positions(
+                center_x=center_x,
+                center_y=center_y,
+                exchange_node_id=exchange_id,
+                tangent=tangent,
+                inward=inward,
+            )
+        )
+
+    return positions
+
+
 def _explicit_positions(topology_name: str, g: nx.Graph) -> dict[Any, tuple[float, float]] | None:
     if topology_name == "2D-FullMesh":
         return _exchange_grid_positions_2d(4, 4)
@@ -358,6 +397,8 @@ def _explicit_positions(topology_name: str, g: nx.Graph) -> dict[Any, tuple[floa
         return _exchange_grid_positions_clos(g)
     if _is_df_name(topology_name):
         return _exchange_grid_positions_df(g)
+    if _is_sparsemesh_name(topology_name):
+        return _exchange_grid_positions_sparsemesh(g)
     return None
 
 
@@ -526,6 +567,18 @@ def _edge_curve_factor(
         return plane_sign * axis_curve
     if _torus_family_name(topology_name) == "3D-Torus" and topology_role == "3d_torus_local":
         return 0.12
+
+    if _is_sparsemesh_name(topology_name) and topology_role.startswith("sparsemesh_o"):
+        plane_index = int(g.nodes[u].get("sparsemesh_plane_index", g.nodes[u].get("local_index", 0)))
+        plane_sign = -1.0 if plane_index == 0 else 1.0
+        offset = int(edge_data.get("sparsemesh_offset", 1))
+        curve = {
+            1: 0.08,
+            2: 0.14,
+            3: 0.20,
+            5: 0.28,
+        }.get(offset, 0.10 + (0.03 * min(offset, 6)))
+        return plane_sign * curve
 
     return 0.0
 

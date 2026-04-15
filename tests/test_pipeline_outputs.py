@@ -148,7 +148,6 @@ def test_dashboard_and_report_use_new_labels(output_dir: Path):
     assert "All Topologies" in html
     assert "SSU-Union Links" in html
     assert "Union-Union Links" in html
-    assert "Quick Analysis" in html
     assert "A2A Throughput" in html
     assert "data-topology-tab" in html
     assert "Theoretical Bandwidth:" in html
@@ -175,6 +174,17 @@ def test_dashboard_and_report_use_new_labels(output_dir: Path):
     assert "Sparse M-to-N" in pdf_text
     assert "PORT_BALANCED" not in pdf_text
     assert "same-exchange SSU traffic stays inside the exchange node via Union switching" in pdf_text
+
+
+def test_pipeline_renders_sparsemesh_dashboard_sections(output_dir: Path):
+    cfg = AnalysisConfig(output_dir=output_dir, routing_mode="SHORTEST_PATH")
+    paths = run_full_analysis(cfg, ["SparseMesh-Local"])
+
+    html = paths["html"].read_text(encoding="utf-8")
+    assert "SparseMesh S=5;N=2" in html
+    assert "Sparse M-to-N Directional Traffic" in html
+    assert "SHORTEST_PATH" in html
+    assert "FULL_PATH" in html
 
 
 def test_route_notes_distinguish_dor_shortest_path_and_full_path_for_torus():

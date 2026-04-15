@@ -1,5 +1,0 @@
-﻿rank,topology,candidate_label,wrap_offsets,is_baseline,a2a_completion_time_s,a2a_per_ssu_throughput_gbps,a2a_average_hops,a2a_max_link_utilization,a2a_link_utilization_cv
-1,2D-Torus,"axis0=[0, 2] | axis1=[0, 0]","[[0, 2], [0, 0]]",False,0.0064,315.0,3.2698412698412698,1.0,0.0
-2,2D-Torus,"axis0=[0, 2] | axis1=[1, 0]","[[0, 2], [1, 0]]",False,0.008533333333333377,236.24999999999878,3.2698412698412698,1.0000000000000002,0.1683250823060366
-3,2D-Torus,"axis0=[0, 0] | axis1=[1, 0]","[[0, 0], [1, 0]]",False,0.01024,196.87499999999997,3.3968253968253967,0.9999999999999999,0.45454545454545464
-4,2D-Torus,baseline,"[[0, 0], [0, 0]]",True,0.010240000000000023,196.87499999999955,3.5238095238095237,1.0,0.3333333333333333

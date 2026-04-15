@@ -17,6 +17,18 @@ _MAX_CLOS_UPLINKS_PER_PLANE = 6
 _CLOS_EXCHANGE_NODE_COUNT = 18
 _MIN_DF_UNIONS_PER_SERVER = 2
 _MIN_DF_RING_UNIONS_PER_SERVER = 4
+_SPARSEMESH_VARIANTS: dict[str, dict[str, int | bool]] = {
+    "SparseMesh-Local": {
+        "sparsity": 5,
+        "stride_count": 2,
+        "sparser": False,
+    },
+    "SparseMesh-Global": {
+        "sparsity": 3,
+        "stride_count": 4,
+        "sparser": False,
+    },
+}
 _TORUS_SHAPES: dict[str, tuple[int, ...]] = {
     "2D-Torus": (2, 4),
     "3D-Torus": (2, 4, 4),
@@ -53,6 +65,13 @@ def is_best_twisted_torus_name(topology_name: str) -> bool:
 
     normalized = topology_name.strip().lower()
     return any(name.lower() == normalized for name in _TORUS_BEST_TWIST_OFFSETS)
+
+
+def is_sparsemesh_topology_name(topology_name: str) -> bool:
+    if not isinstance(topology_name, str):
+        return False
+    normalized = topology_name.strip().lower()
+    return any(name.lower() == normalized for name in _SPARSEMESH_VARIANTS)
 
 
 def _annotate_graph(g: nx.Graph, cfg: AnalysisConfig) -> nx.Graph:
@@ -752,6 +771,105 @@ def _build_df_variant(
     return _annotate_graph(g, cfg)
 
 
+def _build_sparsemesh_neighbor_offsets(
+    *,
+    sparsity: int,
+    stride_count: int,
+    sparser: bool,
+) -> tuple[tuple[int, ...], int]:
+    ring_size = (sparsity * stride_count + sparsity) if sparser else (sparsity * stride_count + 1)
+    if ring_size <= 0:
+        raise ValueError("SparseMesh ring_size must be positive")
+
+    near_count_per_direction = int(sparsity / 2) if ring_size > 1 else 0
+    offsets: set[int] = set()
+
+    for distance in range(1, near_count_per_direction + 1):
+        offsets.add(int(distance))
+
+    for stride_index in range(stride_count):
+        offset = (
+            sparsity * stride_index + (2 * near_count_per_direction) + 1
+            if sparser
+            else sparsity * stride_index + near_count_per_direction + 1
+        )
+        normalized_offset = int(offset) % ring_size
+        if normalized_offset == 0:
+            continue
+        canonical_offset = min(normalized_offset, ring_size - normalized_offset)
+        offsets.add(int(canonical_offset))
+
+    normalized = tuple(sorted(offset for offset in offsets if 0 < offset <= ring_size // 2))
+    return normalized, int(ring_size)
+
+
+def _build_sparsemesh_variant(
+    cfg: AnalysisConfig,
+    *,
+    topology_key: str,
+    sparsity: int,
+    stride_count: int,
+    sparser: bool,
+) -> nx.Graph:
+    g = nx.Graph()
+    offsets, exchange_count = _build_sparsemesh_neighbor_offsets(
+        sparsity=sparsity,
+        stride_count=stride_count,
+        sparser=sparser,
+    )
+    exchanges: dict[int, dict[str, list[str]]] = {}
+
+    for exchange_index in range(exchange_count):
+        exchange_id = f"en{exchange_index}"
+        exchange = _add_exchange_node(g, exchange_id, cfg)
+        _set_exchange_grid_coord(g, exchange, (exchange_index,))
+        exchanges[exchange_index] = exchange
+
+        for union_index, union_id in enumerate(exchange["unions"]):
+            g.nodes[union_id].update(
+                sparsemesh_plane_index=union_index,
+                sparsemesh_exchange_index=exchange_index,
+                sparsemesh_ring_position=exchange_index,
+            )
+        for ssu_id in exchange["ssus"]:
+            g.nodes[ssu_id].update(
+                sparsemesh_exchange_index=exchange_index,
+            )
+
+    for plane_index in range(2):
+        for offset in offsets:
+            for exchange_index in range(exchange_count):
+                dst_exchange_index = (exchange_index + int(offset)) % exchange_count
+                src_union = exchanges[exchange_index]["unions"][plane_index]
+                dst_union = exchanges[dst_exchange_index]["unions"][plane_index]
+                if g.has_edge(src_union, dst_union):
+                    continue
+                _add_backend_link(
+                    g,
+                    src_union,
+                    dst_union,
+                    topology_role=f"sparsemesh_o{int(offset)}",
+                )
+                g.edges[src_union, dst_union]["sparsemesh_offset"] = int(offset)
+
+    g.graph["topology_family"] = "SparseMesh"
+    g.graph["sparsemesh_variant"] = topology_key
+    g.graph["sparsemesh_offsets"] = tuple(int(offset) for offset in offsets)
+    g.graph["sparsemesh_sparsity"] = int(sparsity)
+    g.graph["sparsemesh_stride_count"] = int(stride_count)
+    g.graph["sparsemesh_sparser"] = bool(sparser)
+    g.graph["sparsemesh_ring_node_count"] = int(exchange_count)
+    g.graph["sparsemesh_plane_count"] = 2
+    g.graph["sparsemesh_exchange_count_per_plane"] = int(exchange_count)
+    g.graph["sparsemesh_union_count_per_plane"] = int(exchange_count)
+    g.graph["sparsemesh_ssu_count_per_plane"] = int(exchange_count) * 4
+    g.graph["logical_plane_union_count"] = int(exchange_count)
+    g.graph["logical_plane_ssu_count"] = int(exchange_count) * 4
+    g.graph["direct_backend_mode"] = "dual_plane"
+    g.graph["direct_plane_count"] = 2
+    return _annotate_graph(g, cfg)
+
+
 def build_2d_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
     g = nx.Graph()
     rows = 4
@@ -951,6 +1069,26 @@ def build_df_2p_double_bridge_3global(cfg: AnalysisConfig) -> nx.Graph:
     )
 
 
+def build_sparsemesh_local(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_sparsemesh_variant(
+        cfg,
+        topology_key="SparseMesh-Local",
+        sparsity=int(_SPARSEMESH_VARIANTS["SparseMesh-Local"]["sparsity"]),
+        stride_count=int(_SPARSEMESH_VARIANTS["SparseMesh-Local"]["stride_count"]),
+        sparser=bool(_SPARSEMESH_VARIANTS["SparseMesh-Local"]["sparser"]),
+    )
+
+
+def build_sparsemesh_global(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_sparsemesh_variant(
+        cfg,
+        topology_key="SparseMesh-Global",
+        sparsity=int(_SPARSEMESH_VARIANTS["SparseMesh-Global"]["sparsity"]),
+        stride_count=int(_SPARSEMESH_VARIANTS["SparseMesh-Global"]["stride_count"]),
+        sparser=bool(_SPARSEMESH_VARIANTS["SparseMesh-Global"]["sparser"]),
+    )
+
+
 BUILDERS: dict[str, TopologyBuilder] = {
     "2D-FullMesh": build_2d_fullmesh,
     "2D-Torus": build_2d_torus,
@@ -959,6 +1097,8 @@ BUILDERS: dict[str, TopologyBuilder] = {
     "3D-Torus-BestTwist": build_3d_torus_best_twist,
     "Clos": build_clos,
     "DF": build_df,
+    "SparseMesh-Local": build_sparsemesh_local,
+    "SparseMesh-Global": build_sparsemesh_global,
     "DF-Shuffled": build_df_shuffled,
     "DF-ScaleUp": build_df_scaleup,
     "DF-2P-Double-4Global": build_df_2p_double_4global,

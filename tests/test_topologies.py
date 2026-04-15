@@ -22,6 +22,8 @@ def test_available_topologies_only_exposes_new_names():
         "3D-Torus-BestTwist",
         "Clos",
         "DF",
+        "SparseMesh-Local",
+        "SparseMesh-Global",
         "DF-Shuffled",
         "DF-ScaleUp",
         "DF-2P-Double-4Global",
@@ -210,6 +212,44 @@ def test_df_gives_each_union_six_backend_ports_per_plane_copy_by_default():
     }
     assert union_backend_degree
     assert g.graph["df_plane_count"] == 2
+    assert set(union_backend_degree.values()) == {6}
+
+
+def test_sparsemesh_local_builds_expected_dual_plane_scale():
+    g = build_topology("SparseMesh-Local", AnalysisConfig())
+
+    ssu_nodes = [n for n, d in g.nodes(data=True) if d["node_role"] == "ssu"]
+    union_nodes = [n for n, d in g.nodes(data=True) if d["node_role"] == "union"]
+    backend = [
+        data
+        for _, _, data in g.edges(data=True)
+        if data["link_kind"] == "backend_interconnect"
+    ]
+
+    assert len(ssu_nodes) == 11 * 8
+    assert len(union_nodes) == 11 * 2
+    assert len(backend) == 11 * 3 * 2
+    assert g.graph["sparsemesh_plane_count"] == 2
+    assert g.graph["sparsemesh_sparsity"] == 5
+    assert g.graph["sparsemesh_stride_count"] == 2
+    assert g.graph["sparsemesh_sparser"] is False
+    assert g.graph["sparsemesh_ring_node_count"] == 11
+    assert g.graph["sparsemesh_offsets"] == (1, 2, 3)
+
+
+def test_sparsemesh_global_gives_each_union_six_backend_ports():
+    g = build_topology("SparseMesh-Global", AnalysisConfig())
+    union_backend_degree = {
+        node_id: _backend_ports_for_union(g, node_id)
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert g.graph["sparsemesh_sparsity"] == 3
+    assert g.graph["sparsemesh_stride_count"] == 4
+    assert g.graph["sparsemesh_sparser"] is False
+    assert g.graph["sparsemesh_ring_node_count"] == 13
+    assert g.graph["sparsemesh_offsets"] == (1, 2, 5)
     assert set(union_backend_degree.values()) == {6}
 
 

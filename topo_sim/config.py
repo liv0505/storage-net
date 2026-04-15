@@ -15,6 +15,8 @@ class AnalysisConfig:
             "3D-Torus-BestTwist",
             "Clos",
             "DF",
+            "SparseMesh-Local",
+            "SparseMesh-Global",
         ]
     )
     routing_mode: str = "SHORTEST_PATH"

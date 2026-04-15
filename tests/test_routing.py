@@ -325,6 +325,49 @@ def test_df_2p_double_bridge_3global_same_server_cross_unit_traffic_stays_local(
     } == {("df_server_bridge",)}
 
 
+def test_sparsemesh_shortest_path_stays_on_union_planes_without_intermediate_ssus():
+    g = build_topology("SparseMesh-Local", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en0:ssu0",
+        "en3:ssu0",
+        routing_mode="SHORTEST_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    assert len(paths) == 2
+    assert {round(path.weight, 8) for path in paths} == {0.5}
+    assert {path.hops for path in paths} == {3}
+    for path in paths:
+        assert path.nodes[0] == "en0:ssu0"
+        assert path.nodes[-1] == "en3:ssu0"
+        assert all(
+            g.nodes[node_id].get("node_role") == "union"
+            for node_id in path.nodes[1:-1]
+        )
+        assert _backend_roles_for_path(g, path.nodes) == ["sparsemesh_o3"]
+
+
+def test_sparsemesh_full_path_uses_all_backend_egress_ports_in_both_planes():
+    g = build_topology("SparseMesh-Global", AnalysisConfig())
+    paths = compute_paths(
+        g,
+        "en0:ssu0",
+        "en11:ssu0",
+        routing_mode="FULL_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    assert len(paths) == 12
+    assert {round(path.weight, 8) for path in paths} == {round(1.0 / 12.0, 8)}
+    assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
+    assert all(path.nodes[0] == "en0:ssu0" and path.nodes[-1] == "en11:ssu0" for path in paths)
+    assert all(
+        all(g.nodes[node_id].get("node_role") == "union" for node_id in path.nodes[1:-1])
+        for path in paths
+    )
+
+
 @pytest.mark.parametrize(
     "routing_mode",
     ["DOR", "SHORTEST_PATH", "FULL_PATH", "ECMP", "MIN_HOPS", "PORT_BALANCED"],

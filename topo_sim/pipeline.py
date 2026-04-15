@@ -17,6 +17,7 @@ from .topologies import (
     available_topologies,
     build_topology,
     is_best_twisted_torus_name,
+    is_sparsemesh_topology_name,
     is_torus_topology_name,
     torus_base_name,
 )
@@ -51,6 +52,21 @@ _LINK_VOLUME_DISTRIBUTION_HEADERS = [
     "link_ratio_pct",
 ]
 
+_SPARSEMESH_DISPLAY_VARIANTS = {
+    "SparseMesh-Local": {
+        "sparsity": 5,
+        "stride_count": 2,
+        "sparser": False,
+        "offsets": (1, 2, 3),
+    },
+    "SparseMesh-Global": {
+        "sparsity": 3,
+        "stride_count": 4,
+        "sparser": False,
+        "offsets": (1, 2, 5),
+    },
+}
+
 
 def _is_df_name(name: str) -> bool:
     upper = str(name).strip().upper()
@@ -67,6 +83,10 @@ def _is_torus_best_twist_name(name: str) -> bool:
 
 def _torus_family_name(name: str) -> str | None:
     return torus_base_name(name)
+
+
+def _is_sparsemesh_name(name: str) -> bool:
+    return is_sparsemesh_topology_name(name)
 
 
 def _node_sort_key(node_id: str) -> tuple[int, str, int]:
@@ -109,6 +129,11 @@ def _analysis_mode_for_topology(name: str, cfg: AnalysisConfig) -> str:
         return "ECMP"
     if _is_df_name(name):
         return "SHORTEST_PATH"
+    if _is_sparsemesh_name(name):
+        requested = normalize_routing_mode(cfg.routing_mode)
+        if requested in {"DOR", "ECMP"}:
+            return "SHORTEST_PATH"
+        return requested
     if _is_torus_best_twist_name(name) and normalize_routing_mode(cfg.routing_mode) == "DOR":
         return "SHORTEST_PATH"
     return normalize_routing_mode(cfg.routing_mode)
@@ -295,6 +320,18 @@ def _topology_scale(name: str, g: nx.Graph) -> str:
             f"{group_count} shared exchange groups | {plane_count} DF planes | "
             f"{server_count} local 4-Union groups/plane | {unions_per_plane} Union/plane"
         )
+    if _is_sparsemesh_name(name):
+        plane_count = int(g.graph.get("sparsemesh_plane_count", 1))
+        exchange_count = int(g.graph.get("sparsemesh_exchange_count_per_plane", 0))
+        ssu_per_plane = int(g.graph.get("sparsemesh_ssu_count_per_plane", 0))
+        offsets = tuple(int(value) for value in g.graph.get("sparsemesh_offsets", ()))
+        sparsity = int(g.graph.get("sparsemesh_sparsity", 0))
+        stride_count = int(g.graph.get("sparsemesh_stride_count", 0))
+        offset_label = ", ".join(f"±{value}" for value in offsets)
+        return (
+            f"{exchange_count} shared exchange groups | {plane_count} SparseMesh planes | "
+            f"{exchange_count} Union/plane | {ssu_per_plane} SSU/plane | s={sparsity}, N={stride_count} | {offset_label}"
+        )
     return "18 exchange nodes"
 
 
@@ -365,6 +402,19 @@ def _topology_pattern(name: str, g: nx.Graph, cfg: AnalysisConfig) -> str:
                 f"and the two 2P units inside a server add one 400 Gbps bridge per Union lane before exposing 3 global 400 Gbps links inside {plane_phrase}."
             )
         return f"Each Union uses {local_ports} local 400 Gbps links and {global_ports} global 400 Gbps links inside {plane_phrase}."
+    if _is_sparsemesh_name(name):
+        offsets = tuple(int(value) for value in g.graph.get("sparsemesh_offsets", ()))
+        sparsity = int(g.graph.get("sparsemesh_sparsity", 0))
+        stride_count = int(g.graph.get("sparsemesh_stride_count", 0))
+        sparser = bool(g.graph.get("sparsemesh_sparser", False))
+        offset_label = ", ".join(f"±{value}" for value in offsets)
+        style = "more local" if name == "SparseMesh-Local" else "more long-jump"
+        return (
+            "Each Union uses 6 backend ports on one sparsemesh plane generated from the original ring rule with "
+            f"s={sparsity}, N={stride_count}, sparser={str(sparser).lower()}, producing offsets {offset_label}. "
+            f"The two Union chips inside each exchange node belong to two independent sparsemesh planes with no Union-to-Union local bridge. "
+            f"This variant is biased toward {style} connectivity while preserving ring diameter 2."
+        )
     return (
         "Each exchange node keeps two independent Union planes; each Union uplinks via "
         f"{cfg.clos_uplinks_per_exchange_node} x 400 Gbps into its own Clos spine pool, "
@@ -393,6 +443,8 @@ def _topology_configuration(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict
 
     if _is_df_name(name):
         backend_ports_per_union = int(g.graph.get("df_backend_ports_per_union", 0))
+    elif _is_sparsemesh_name(name):
+        backend_ports_per_union = 6
     else:
         backend_ports_per_union = {
             "2D-FullMesh": 6,
@@ -434,12 +486,29 @@ def _topology_configuration(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict
         topology_cfg["df_local_topology"] = str(g.graph.get("df_local_topology", "fullmesh"))
         topology_cfg["df_local_ports_per_union"] = int(g.graph.get("df_local_ports_per_union", 0))
         topology_cfg["df_global_ports_per_union"] = int(g.graph.get("df_global_ports_per_union", 0))
+    if _is_sparsemesh_name(name):
+        topology_cfg["sparsemesh_variant"] = str(g.graph.get("sparsemesh_variant", name))
+        topology_cfg["sparsemesh_plane_count"] = int(g.graph.get("sparsemesh_plane_count", 1))
+        topology_cfg["sparsemesh_exchange_count_per_plane"] = int(
+            g.graph.get("sparsemesh_exchange_count_per_plane", 0)
+        )
+        topology_cfg["sparsemesh_union_count_per_plane"] = int(
+            g.graph.get("sparsemesh_union_count_per_plane", 0)
+        )
+        topology_cfg["sparsemesh_ssu_count_per_plane"] = int(
+            g.graph.get("sparsemesh_ssu_count_per_plane", 0)
+        )
+        topology_cfg["sparsemesh_offsets"] = [
+            int(value) for value in g.graph.get("sparsemesh_offsets", ())
+        ]
+        topology_cfg["sparsemesh_sparsity"] = int(g.graph.get("sparsemesh_sparsity", 0))
+        topology_cfg["sparsemesh_stride_count"] = int(g.graph.get("sparsemesh_stride_count", 0))
+        topology_cfg["sparsemesh_sparser"] = bool(g.graph.get("sparsemesh_sparser", False))
     return topology_cfg
 
 
 def _routing_configuration(name: str, cfg: AnalysisConfig) -> dict[str, Any]:
     mode = _analysis_mode_for_topology(name, cfg)
-    direct_connect = name == "2D-FullMesh" or _is_torus_name(name)
     if _is_df_name(name):
         return {
             "mode": mode,
@@ -479,6 +548,16 @@ def _routing_configuration(name: str, cfg: AnalysisConfig) -> dict[str, Any]:
             notes.append(
                 "the wrap edges use a fixed best-twist offset, so deterministic DOR is intentionally not exposed for this topology"
             )
+    elif _is_sparsemesh_name(name):
+        variant = _SPARSEMESH_DISPLAY_VARIANTS.get(name, {})
+        offsets = tuple(int(value) for value in variant.get("offsets", ()))
+        offset_label = ", ".join(f"±{value}" for value in offsets)
+        notes.append(
+            "the two Union chips inside each exchange node belong to two independent sparsemesh planes, so routing evaluates the two planes separately"
+        )
+        notes.append(
+            f"within each sparsemesh plane, every Union connects to offsets {offset_label} on the original sparsemesh ring and never crosses through intermediate SSUs"
+        )
     if mode == "DOR":
         if _torus_family_name(name) == "2D-Torus":
             notes.append("DOR keeps each Union plane on deterministic dimension-order shortest routing in X -> Y order")
@@ -655,6 +734,8 @@ def _workload_description_payload(
 
 def _routing_mode_description(mode: str, topology_name: str, cfg: AnalysisConfig) -> str:
     if mode == "DOR":
+        if _is_sparsemesh_name(topology_name):
+            return "Not exposed for SparseMesh; falls back to all-shortest-path routing."
         if _torus_family_name(topology_name) == "2D-Torus":
             return "Fixed shortest routing in X -> Y order."
         if _torus_family_name(topology_name) == "3D-Torus":
@@ -665,8 +746,12 @@ def _routing_mode_description(mode: str, topology_name: str, cfg: AnalysisConfig
     if mode == "SHORTEST_PATH":
         if _is_df_name(topology_name):
             return "Single shortest-path routing on the Dragon-Fly Union graph."
+        if _is_sparsemesh_name(topology_name):
+            return "Evenly splits traffic across all shortest paths inside each sparsemesh plane."
         return "Evenly splits traffic across all shortest paths."
     if mode == "FULL_PATH":
+        if _is_sparsemesh_name(topology_name):
+            return "Uses every backend egress in each sparsemesh plane, then picks the least-hop continuation per egress."
         return f"Uses every backend egress; prefers shortest paths and allows up to {cfg.port_balanced_max_detour_hops} extra hop(s) if needed."
     if mode == "ECMP":
         return "Splits Clos traffic across equal-cost spine paths."
@@ -688,6 +773,8 @@ def _comparison_modes_for_topology(name: str) -> list[str]:
         return ["ECMP"]
     if _is_df_name(name):
         return ["SHORTEST_PATH"]
+    if _is_sparsemesh_name(name):
+        return ["SHORTEST_PATH", "FULL_PATH"]
     if _is_torus_best_twist_name(name):
         return ["SHORTEST_PATH", "FULL_PATH"]
     return ["DOR", "SHORTEST_PATH", "FULL_PATH"]
@@ -697,6 +784,8 @@ def _default_highlight_mode(name: str) -> str:
     if name == "Clos":
         return "ECMP"
     if _is_df_name(name):
+        return "SHORTEST_PATH"
+    if _is_sparsemesh_name(name):
         return "SHORTEST_PATH"
     if _is_torus_best_twist_name(name):
         return "SHORTEST_PATH"

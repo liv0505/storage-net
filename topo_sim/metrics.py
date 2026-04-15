@@ -81,6 +81,14 @@ def _is_df_topology(g: nx.Graph) -> bool:
     return topology_name == "DF" or topology_name.startswith("DF-")
 
 
+def _is_sparsemesh_topology(g: nx.Graph) -> bool:
+    family = str(g.graph.get("topology_family", "")).upper()
+    if family == "SPARSEMESH":
+        return True
+    topology_name = str(g.graph.get("topology_name", "")).upper()
+    return topology_name.startswith("SPARSEMESH")
+
+
 def _server_id(g: nx.Graph, node_id: str) -> int | None:
     value = g.nodes[node_id].get("server_id")
     if value is None:
@@ -181,7 +189,7 @@ def _torus_candidate_exchange_partitions(
 def _candidate_exchange_partitions(g: nx.Graph) -> list[frozenset[str]]:
     exchange_ids = _exchange_ids(g)
     exchange_count = len(exchange_ids)
-    if exchange_count == 0 or exchange_count % 2 != 0:
+    if exchange_count == 0:
         return []
 
     topology_kind = _infer_direct_topology_kind(g)
@@ -200,11 +208,7 @@ def _candidate_exchange_partitions(g: nx.Graph) -> list[frozenset[str]]:
     if exchange_count > 18:
         return _sliding_window_exchange_partitions(exchange_ids, half)
 
-    fixed = exchange_ids[0]
-    return [
-        frozenset((fixed, *combo))
-        for combo in combinations(exchange_ids[1:], half - 1)
-    ]
+    return _balanced_partition_candidates(exchange_ids)
 
 
 def _df_candidate_exchange_partitions(
@@ -523,6 +527,8 @@ def _should_use_direct_projection_fast_path(g: nx.Graph, routing_mode: str) -> b
     if bool(g.graph.get("torus_twisted", False)):
         return False
     mode = normalize_routing_mode(routing_mode)
+    if _is_sparsemesh_topology(g):
+        return mode in {"DOR", "SHORTEST_PATH", "FULL_PATH"}
     if mode in {"DOR", "FULL_PATH"}:
         return _infer_direct_topology_kind(g) in {"2D-FULLMESH", "2D-TORUS", "3D-TORUS"}
     if mode == "SHORTEST_PATH" and _infer_direct_topology_kind(g) in {"2D-TORUS", "3D-TORUS"}:
