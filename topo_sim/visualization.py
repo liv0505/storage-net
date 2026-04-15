@@ -1518,110 +1518,142 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
     if not results:
         return []
 
-    a2a_sorted = sorted(
-        results,
-        key=lambda item: float(item["communication_metrics"]["A2A"]["per_ssu_throughput_gbps"]),
-        reverse=True,
-    )
-    sparse_sorted = sorted(
-        results,
-        key=lambda item: float(item["communication_metrics"]["Sparse 1-to-N"]["per_ssu_throughput_gbps"]),
-        reverse=True,
-    )
-
-    a2a_backend_limited = [
-        item["display_name"]
-        for item in results
-        if float(item["communication_metrics"]["A2A"]["max_link_utilization"]) >= 0.995
-    ]
-    a2a_not_backend_limited = [
-        item["display_name"]
-        for item in results
-        if float(item["communication_metrics"]["A2A"]["max_link_utilization"]) < 0.995
-    ]
-
-    worst_a2a_balance = max(
-        results,
-        key=lambda item: float(item["communication_metrics"]["A2A"]["link_utilization_cv"]),
-    )
-    worst_sparse_balance = max(
-        results,
-        key=lambda item: float(item["communication_metrics"]["Sparse 1-to-N"]["link_utilization_cv"]),
-    )
-    near_zero_cv_topologies = [
-        item["display_name"]
-        for item in results
-        if float(item["communication_metrics"]["A2A"]["link_utilization_cv"]) <= 1e-6
-    ]
-
     result_by_name = {str(item["name"]): item for item in results}
-    twist_effect_rows: list[str] = []
-    for base_name, twist_name in (
-        ("2D-Torus", "2D-Torus-BestTwist"),
-        ("3D-Torus", "3D-Torus-BestTwist"),
-    ):
-        base_item = result_by_name.get(base_name)
-        twist_item = result_by_name.get(twist_name)
-        if base_item is None or twist_item is None:
-            continue
 
-        base_a2a = base_item["communication_metrics"]["A2A"]
-        twist_a2a = twist_item["communication_metrics"]["A2A"]
-        twist_effect_rows.append(
-            f"{display_topology_name(base_name)} 从 CV {base_a2a['link_utilization_cv']:.3f} "
-            f"降到 {twist_a2a['link_utilization_cv']:.3f}，A2A 吞吐从 "
-            f"{base_a2a['per_ssu_throughput_gbps']:.0f} 提升到 "
-            f"{twist_a2a['per_ssu_throughput_gbps']:.0f} Gbps"
+    def get_item(name: str) -> dict[str, Any] | None:
+        return result_by_name.get(name)
+
+    def a2a_tp(item: dict[str, Any] | None) -> float:
+        if item is None:
+            return 0.0
+        return float(item["communication_metrics"]["A2A"]["per_ssu_throughput_gbps"])
+
+    def a2a_cv(item: dict[str, Any] | None) -> float:
+        if item is None:
+            return 0.0
+        return float(item["communication_metrics"]["A2A"]["link_utilization_cv"])
+
+    def bisection(item: dict[str, Any] | None) -> float:
+        if item is None:
+            return 0.0
+        return float(item["structural_metrics"]["per_node_bisection_bandwidth_gbps"])
+
+    def hops(item: dict[str, Any] | None) -> float:
+        if item is None:
+            return 0.0
+        return float(item["communication_metrics"]["A2A"]["average_hops"])
+
+    def ssu_count(item: dict[str, Any] | None) -> int:
+        if item is None:
+            return 0
+        return int(item["structural_metrics"]["ssu_count"])
+
+    clos = get_item("Clos")
+    fullmesh = get_item("2D-FullMesh")
+    sparse_global = get_item("SparseMesh-Global")
+    sparse_local = get_item("SparseMesh-Local")
+    torus2_twist = get_item("2D-Torus-BestTwist")
+    torus3_twist = get_item("3D-Torus-BestTwist")
+    dragonfly = get_item("DF")
+    torus3 = get_item("3D-Torus")
+    torus2 = get_item("2D-Torus")
+
+    cards: list[dict[str, str]] = []
+
+    if clos is not None or fullmesh is not None:
+        first_parts: list[str] = []
+        if clos is not None:
+            first_parts.append(
+                f"{clos['display_name']} 的 A2A 每 SSU 吞吐最高，为 {a2a_tp(clos):.0f} Gbps；"
+                f"每 SSU 对分带宽达到 {bisection(clos):.0f} Gbps，链路利用率 CV 为 {a2a_cv(clos):.3f}。"
+            )
+        if fullmesh is not None:
+            first_parts.append(
+                f"{fullmesh['display_name']} 以 {a2a_tp(fullmesh):.0f} Gbps 紧随其后，"
+                f"同样接近零热点，平均跳数只有 {hops(fullmesh):.2f}。"
+            )
+        first_parts.append("这一档的共同特点是后端切分能力强、流量分布均匀，因此 A2A 表现最稳。")
+        cards.append(
+            {
+                "title": "第一档：Clos 与 2D-FullMesh",
+                "body": "".join(first_parts),
+            }
         )
 
-    top_a2a = a2a_sorted[0]
-    runner_up_a2a = a2a_sorted[1] if len(a2a_sorted) > 1 else a2a_sorted[0]
-    top_sparse = sparse_sorted[0]
-    runner_up_sparse = sparse_sorted[1] if len(sparse_sorted) > 1 else sparse_sorted[0]
+    if sparse_global is not None or sparse_local is not None:
+        sparse_parts: list[str] = []
+        if sparse_global is not None and sparse_local is not None:
+            sparse_parts.append(
+                f"{sparse_global['display_name']} 和 {sparse_local['display_name']} 的 A2A 每 SSU 吞吐分别为 "
+                f"{a2a_tp(sparse_global):.0f} / {a2a_tp(sparse_local):.0f} Gbps，已经逼近第一档。"
+            )
+            sparse_parts.append(
+                f"它们的规模分别是 {ssu_count(sparse_global)} / {ssu_count(sparse_local)} 个 SSU，"
+                f"每 SSU 对分带宽为 {bisection(sparse_global):.0f} / {bisection(sparse_local):.0f} Gbps。"
+            )
+        sparse_parts.append(
+            "SparseMesh 虽然 fanout 只有 6，但单平面直径可控制在 2 跳，路径短、切分能力也不弱，"
+            "所以在当前这组规模下，每 SSU 的 A2A 吞吐表现会明显好于常规 Torus。"
+        )
+        cards.append(
+            {
+                "title": "第二档：SparseMesh",
+                "body": "".join(sparse_parts),
+            }
+        )
 
-    return [
-        {
-            "title": "A2A 性能",
-            "body": (
-                f"A2A 下，{top_a2a['display_name']} 的每 SSU 吞吐最高，为 "
-                f"{top_a2a['communication_metrics']['A2A']['per_ssu_throughput_gbps']:.0f} Gbps；"
-                f"{runner_up_a2a['display_name']} 次之，为 "
-                f"{runner_up_a2a['communication_metrics']['A2A']['per_ssu_throughput_gbps']:.0f} Gbps。"
-                "A2A 最能体现后端总带宽、路径多样性和全局对分压力。"
-                "从这组结果看，Best Twist 的价值主要体现在 A2A：它通过重排 wrap 边界来降低热点、提升均衡度。"
-            ),
-        },
-        {
-            "title": "稀疏 M-to-N",
-            "body": (
-                f"稀疏 M-to-N 下，{top_sparse['display_name']} 的每 SSU 吞吐最高，为 "
-                f"{top_sparse['communication_metrics']['Sparse 1-to-N']['per_ssu_throughput_gbps']:.0f} Gbps；"
-                f"{runner_up_sparse['display_name']} 紧随其后。"
-                "相比 A2A，这一场景跨全局割面的并发流更少，所以不同拓扑之间的差距通常会缩小。"
-                "因此 Best Twist 在这一部分更多体现为缓解局部热点，未必会带来同等幅度的吞吐提升。"
-            ),
-        },
-        {
-            "title": "为什么有的链路到 100%",
-            "body": (
-                f"A2A 下，{_join_display_names(a2a_backend_limited)} 的后端最大利用率达到 100%，"
-                "说明这些拓扑的瓶颈就在后端互连"
-                f"{'；' if a2a_not_backend_limited else '。'}"
-                f"{f'{_join_display_names(a2a_not_backend_limited)} 未到 100%，通常说明瓶颈更多落在非后端链路，例如 200G 的 SSU-Union 接入链路。' if a2a_not_backend_limited else ''}"
-            ),
-        },
-        {
-            "title": "均衡度与热点",
-            "body": (
-                "Twist 的核心不是增加带宽，而是重排 torus 的 wrap 边连接关系，把原本集中在少数边界链路上的流量打散到更多链路上。"
-                f"{'从当前结果看，' + '；'.join(twist_effect_rows) + '。' if twist_effect_rows else ''}"
-                f"A2A 下，CV 接近 0 的并不只有一个拓扑，当前达到近似 0 的有 {_join_display_names(near_zero_cv_topologies)}；"
-                f"{worst_a2a_balance['display_name']} 的不均衡最明显 "
-                f"(CV {worst_a2a_balance['communication_metrics']['A2A']['link_utilization_cv']:.3f})。"
-                f"稀疏 M-to-N 下，{worst_sparse_balance['display_name']} 的流量集中度最高，更容易出现局部热点。"
-            ),
-        },
-    ]
+    if torus2_twist is not None or torus3_twist is not None:
+        twist_parts: list[str] = []
+        if torus2_twist is not None and torus2 is not None:
+            twist_parts.append(
+                f"{torus2_twist['display_name']} 相比 {torus2['display_name']}，"
+                f"A2A 每 SSU 吞吐从 {a2a_tp(torus2):.0f} 提升到 {a2a_tp(torus2_twist):.0f} Gbps，"
+                f"CV 从 {a2a_cv(torus2):.3f} 降到 {a2a_cv(torus2_twist):.3f}。"
+            )
+        if torus3_twist is not None and torus3 is not None:
+            twist_parts.append(
+                f"{torus3_twist['display_name']} 相比 {torus3['display_name']}，"
+                f"A2A 每 SSU 吞吐从 {a2a_tp(torus3):.0f} 提升到 {a2a_tp(torus3_twist):.0f} Gbps，"
+                f"CV 从 {a2a_cv(torus3):.3f} 降到 {a2a_cv(torus3_twist):.3f}。"
+            )
+        twist_parts.append(
+            "这一档的价值主要体现在 A2A：Twist 不增加端口预算，而是通过重排 wrap 链路把热点打散，"
+            "把原始 Torus 的不均衡问题基本消掉。"
+        )
+        cards.append(
+            {
+                "title": "第三档：Best Twist Torus",
+                "body": "".join(twist_parts),
+            }
+        )
+
+    fourth_names = [item for item in (dragonfly, torus3, torus2) if item is not None]
+    if fourth_names:
+        fourth_parts: list[str] = []
+        if dragonfly is not None:
+            fourth_parts.append(
+                f"{dragonfly['display_name']} 的规模最大，共 {ssu_count(dragonfly)} 个 SSU，"
+                f"A2A 每 SSU 吞吐为 {a2a_tp(dragonfly):.0f} Gbps。"
+            )
+        torus_notes: list[str] = []
+        if torus3 is not None:
+            torus_notes.append(f"{torus3['display_name']} {a2a_tp(torus3):.0f} Gbps")
+        if torus2 is not None:
+            torus_notes.append(f"{torus2['display_name']} {a2a_tp(torus2):.0f} Gbps")
+        if torus_notes:
+            fourth_parts.append("原始 Torus 的 A2A 每 SSU 吞吐分别为 " + "、".join(torus_notes) + "。")
+        fourth_parts.append(
+            "这一档并不代表拓扑设计差，而是说明当网络规模更大、或者对分带宽和流量均衡度更受限时，"
+            "A2A 这种全局最重负载模式会更早暴露后端瓶颈。"
+        )
+        cards.append(
+            {
+                "title": "第四档：Dragon-Fly 与原始 Torus",
+                "body": "".join(fourth_parts),
+            }
+        )
+
+    return cards
 
 
 def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> Path:
