@@ -16,7 +16,12 @@ from .topologies import build_twisted_torus, torus_shape
 from .traffic import build_a2a_demands
 
 
-_SUPPORTED_TORUS_TOPOLOGIES = ("2D-Torus", "3D-Torus")
+_SUPPORTED_TORUS_TOPOLOGIES = (
+    "2D-Torus",
+    "3D-Torus",
+    "3D-Torus-2x4x2",
+    "3D-Torus-2x4x1",
+)
 _SEARCH_RESULT_HEADERS = [
     "rank",
     "topology",
@@ -57,6 +62,9 @@ def _half_shift_choices(size: int) -> tuple[int, ...]:
 
 
 def _axis_wrap_vectors(shape: tuple[int, ...], axis: int) -> list[tuple[int, ...]]:
+    if int(shape[axis]) <= 1:
+        return [tuple(0 for _ in shape)]
+
     per_dim_choices: list[tuple[int, ...]] = []
     for dim, size in enumerate(shape):
         if dim == axis:

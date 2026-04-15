@@ -1,11 +1,16 @@
 {
   "topology_names": [
+    "Clos",
     "2D-FullMesh",
+    "2D-FullMesh-2x4",
     "2D-Torus",
     "2D-Torus-BestTwist",
     "3D-Torus",
     "3D-Torus-BestTwist",
-    "Clos",
+    "3D-Torus-2x4x2",
+    "3D-Torus-2x4x2-BestTwist",
+    "3D-Torus-2x4x1",
+    "3D-Torus-2x4x1-BestTwist",
     "DF",
     "SparseMesh-Local",
     "SparseMesh-Global"
@@ -32,12 +37,17 @@
   "random_seed": 42,
   "output_dir": "outputs_py314_full_topology_compare_with_sparsemesh_20260414",
   "selected_topologies": [
+    "Clos",
     "2D-FullMesh",
+    "2D-FullMesh-2x4",
     "2D-Torus",
     "2D-Torus-BestTwist",
     "3D-Torus",
     "3D-Torus-BestTwist",
-    "Clos",
+    "3D-Torus-2x4x2",
+    "3D-Torus-2x4x2-BestTwist",
+    "3D-Torus-2x4x1",
+    "3D-Torus-2x4x1-BestTwist",
     "DF",
     "SparseMesh-Local",
     "SparseMesh-Global"

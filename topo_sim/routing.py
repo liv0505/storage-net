@@ -816,14 +816,14 @@ def _compute_dor_backend_union_path(
     union_label: str,
 ) -> tuple[str, ...]:
     if topology_kind == "2D-FULLMESH":
-        size = _torus_side_length(_exchange_count(g), dimensions=2)
-        current_coord = _exchange_to_coord_2d(src_exchange, size)
-        dst_coord = _exchange_to_coord_2d(dst_exchange, size)
+        _fullmesh_exchange_grid_shape(g)
+        current_coord = _torus_exchange_coord(g, src_exchange)
+        dst_coord = _torus_exchange_coord(g, dst_exchange)
         current_union = f"{src_exchange}:{union_label}"
         nodes: list[str] = [current_union]
 
         if current_coord[1] != dst_coord[1]:
-            next_exchange = _coord_to_exchange_2d((current_coord[0], dst_coord[1]), size)
+            next_exchange = _torus_coord_to_exchange(g, (current_coord[0], dst_coord[1]))
             next_union = f"{next_exchange}:{union_label}"
             if not g.has_edge(current_union, next_union):
                 raise ValueError(
@@ -834,7 +834,7 @@ def _compute_dor_backend_union_path(
             current_union = next_union
 
         if current_coord[0] != dst_coord[0]:
-            next_exchange = _coord_to_exchange_2d((dst_coord[0], current_coord[1]), size)
+            next_exchange = _torus_coord_to_exchange(g, (dst_coord[0], current_coord[1]))
             next_union = f"{next_exchange}:{union_label}"
             if not g.has_edge(current_union, next_union):
                 raise ValueError(
@@ -881,6 +881,10 @@ def _compute_dor_backend_union_path(
 
 
 def _infer_direct_topology_kind(g: nx.Graph) -> str | None:
+    graph_hint = str(g.graph.get("direct_topology_kind", "")).upper().strip()
+    if graph_hint in {"2D-FULLMESH", "2D-TORUS", "3D-TORUS"}:
+        return graph_hint
+
     backend_roles = {
         str(data.get("topology_role"))
         for _, _, data in g.edges(data=True)
@@ -942,6 +946,14 @@ def _exchange_count(g: nx.Graph) -> int:
         if data.get("exchange_node_id") is not None
     }
     return len(exchanges)
+
+
+def _fullmesh_exchange_grid_shape(g: nx.Graph) -> tuple[int, int]:
+    shape = g.graph.get("fullmesh_exchange_grid_shape")
+    if not shape:
+        raise ValueError("Full-mesh graph is missing fullmesh_exchange_grid_shape metadata")
+    rows, cols = tuple(int(value) for value in shape)
+    return rows, cols
 
 
 def _torus_exchange_grid_shape(g: nx.Graph) -> tuple[int, ...]:

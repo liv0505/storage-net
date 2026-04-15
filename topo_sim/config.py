@@ -9,10 +9,15 @@ class AnalysisConfig:
     topology_names: list[str] = field(
         default_factory=lambda: [
             "2D-FullMesh",
+            "2D-FullMesh-2x4",
             "2D-Torus",
             "2D-Torus-BestTwist",
             "3D-Torus",
             "3D-Torus-BestTwist",
+            "3D-Torus-2x4x2",
+            "3D-Torus-2x4x2-BestTwist",
+            "3D-Torus-2x4x1",
+            "3D-Torus-2x4x1-BestTwist",
             "Clos",
             "DF",
             "SparseMesh-Local",

@@ -35,11 +35,35 @@ def test_2d_fullmesh_bisection_matches_two_plane_cut_formula():
     assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(200.0)
 
 
+def test_2d_fullmesh_2x4_bisection_matches_two_plane_cut_formula():
+    g = build_topology("2D-FullMesh-2x4", AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(3200.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(100.0)
+
+
 def test_3d_torus_bisection_matches_surface_cut_formula():
     g = build_topology("3D-Torus", AnalysisConfig())
     metrics = compute_structural_metrics(g)
 
     assert metrics["bisection_bandwidth_gbps"] == pytest.approx(12800.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(100.0)
+
+
+def test_3d_torus_2x4x2_bisection_matches_surface_cut_formula():
+    g = build_topology("3D-Torus-2x4x2", AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(6400.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(100.0)
+
+
+def test_3d_torus_2x4x1_bisection_matches_surface_cut_formula():
+    g = build_topology("3D-Torus-2x4x1", AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(3200.0)
     assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(100.0)
 
 

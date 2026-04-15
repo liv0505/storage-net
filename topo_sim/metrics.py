@@ -59,6 +59,10 @@ def _source_union_ids(g: nx.Graph, src_ssu: str) -> list[str]:
 
 
 def _infer_direct_topology_kind(g: nx.Graph) -> str | None:
+    graph_hint = str(g.graph.get("direct_topology_kind", "")).upper().strip()
+    if graph_hint in {"2D-FULLMESH", "2D-TORUS", "3D-TORUS"}:
+        return graph_hint
+
     backend_roles = {
         str(data.get("topology_role"))
         for _, _, data in g.edges(data=True)

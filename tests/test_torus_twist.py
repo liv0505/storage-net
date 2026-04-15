@@ -37,6 +37,18 @@ def test_3d_torus_google_twist_candidate_count_matches_expected_space():
     assert sum(1 for spec in candidates if spec.is_baseline) == 1
 
 
+def test_3d_torus_2x4x2_google_twist_candidate_count_matches_expected_space():
+    candidates = generate_google_torus_twist_candidates("3D-Torus-2x4x2")
+    assert len(candidates) == 64
+    assert sum(1 for spec in candidates if spec.is_baseline) == 1
+
+
+def test_3d_torus_2x4x1_google_twist_candidate_count_matches_expected_space():
+    candidates = generate_google_torus_twist_candidates("3D-Torus-2x4x1")
+    assert len(candidates) == 4
+    assert sum(1 for spec in candidates if spec.is_baseline) == 1
+
+
 def test_2d_torus_baseline_twist_matches_current_default_builder():
     cfg = AnalysisConfig()
     baseline = next(
@@ -108,4 +120,54 @@ def test_twisted_3d_torus_preserves_union_backend_port_budget():
         for _, _, data in g.edges(data=True)
         if data.get("link_kind") == "backend_interconnect"
     ) == 192
+    assert g.graph["torus_twisted"] is True
+
+
+def test_twisted_3d_torus_2x4x2_preserves_union_backend_port_budget():
+    cfg = AnalysisConfig()
+    twisted_spec = next(
+        spec
+        for spec in generate_google_torus_twist_candidates("3D-Torus-2x4x2")
+        if spec.wrap_offsets_by_axis == ((0, 0, 1), (1, 0, 1), (0, 2, 0))
+    )
+
+    g = build_torus_twist_graph(cfg, twisted_spec)
+    union_backend_ports = {
+        str(node_id): _backend_ports_for_union(g, str(node_id))
+        for node_id, node_data in g.nodes(data=True)
+        if node_data.get("node_role") == "union"
+    }
+
+    assert union_backend_ports
+    assert set(union_backend_ports.values()) == {6}
+    assert sum(
+        int(data.get("parallel_links", 1))
+        for _, _, data in g.edges(data=True)
+        if data.get("link_kind") == "backend_interconnect"
+    ) == 96
+    assert g.graph["torus_twisted"] is True
+
+
+def test_twisted_3d_torus_2x4x1_preserves_union_backend_port_budget():
+    cfg = AnalysisConfig()
+    twisted_spec = next(
+        spec
+        for spec in generate_google_torus_twist_candidates("3D-Torus-2x4x1")
+        if spec.wrap_offsets_by_axis == ((0, 2, 0), (0, 0, 0), (0, 0, 0))
+    )
+
+    g = build_torus_twist_graph(cfg, twisted_spec)
+    union_backend_ports = {
+        str(node_id): _backend_ports_for_union(g, str(node_id))
+        for node_id, node_data in g.nodes(data=True)
+        if node_data.get("node_role") == "union"
+    }
+
+    assert union_backend_ports
+    assert set(union_backend_ports.values()) == {4}
+    assert sum(
+        int(data.get("parallel_links", 1))
+        for _, _, data in g.edges(data=True)
+        if data.get("link_kind") == "backend_interconnect"
+    ) == 32
     assert g.graph["torus_twisted"] is True

@@ -646,7 +646,7 @@
                     </tr>
                   </thead>
                   <tbody>
-                    {% for r in results %}
+                    {% for r in comparison_results %}
                     <tr>
                       <td>{{ r.display_name }}</td>
                       <td>{{ '%.0f'|format(r.structural_metrics.diameter) }}</td>
@@ -679,7 +679,7 @@
                     </tr>
                   </thead>
                   <tbody>
-                    {% for r in results %}
+                    {% for r in comparison_results %}
                     <tr>
                       <td>{{ r.display_name }}</td>
                       <td>{{ '%.2f'|format(r.communication_metrics['A2A'].per_ssu_throughput_gbps) }} Gbps</td>
@@ -709,7 +709,7 @@
                     </tr>
                   </thead>
                   <tbody>
-                    {% for r in results %}
+                    {% for r in comparison_results %}
                     <tr>
                       <td>{{ r.display_name }}</td>
                       <td>{{ '%.2f'|format(r.communication_metrics['Sparse 1-to-N'].per_ssu_throughput_gbps) }} Gbps</td>

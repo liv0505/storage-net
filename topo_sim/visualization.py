@@ -10,7 +10,13 @@ import plotly.graph_objects as go
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .labels import display_topology_name, display_workload_name
-from .topologies import is_sparsemesh_topology_name, is_torus_topology_name, torus_base_name
+from .topologies import (
+    fullmesh_shape,
+    is_fullmesh_topology_name,
+    is_sparsemesh_topology_name,
+    is_torus_topology_name,
+    torus_base_name,
+)
 
 
 _INTERNAL_EDGE_COLOR = "rgba(92, 108, 136, 0.22)"
@@ -387,8 +393,9 @@ def _exchange_grid_positions_sparsemesh(g: nx.Graph) -> dict[str, tuple[float, f
 
 
 def _explicit_positions(topology_name: str, g: nx.Graph) -> dict[Any, tuple[float, float]] | None:
-    if topology_name == "2D-FullMesh":
-        return _exchange_grid_positions_2d(4, 4)
+    if is_fullmesh_topology_name(topology_name):
+        shape = tuple(int(value) for value in g.graph.get("fullmesh_exchange_grid_shape", fullmesh_shape(topology_name)))
+        return _exchange_grid_positions_2d(int(shape[0]), int(shape[1]))
     if _torus_family_name(topology_name) == "2D-Torus":
         return _exchange_grid_positions_2d_torus(g)
     if _torus_family_name(topology_name) == "3D-Torus":
@@ -527,7 +534,7 @@ def _edge_curve_factor(
         return 0.0
 
     topology_role = str(edge_data.get("topology_role", ""))
-    if topology_name == "2D-FullMesh" and topology_role in {"2d_fullmesh_x", "2d_fullmesh_y"}:
+    if is_fullmesh_topology_name(topology_name) and topology_role in {"2d_fullmesh_x", "2d_fullmesh_y"}:
         union_plane = int(g.nodes[u].get("local_index", 0))
         plane_sign = -1.0 if union_plane == 0 else 1.0
         axis_sign = 1.0 if topology_role.endswith("_x") else -1.0
@@ -1514,6 +1521,26 @@ def _join_display_names(names: list[str]) -> str:
     return "、".join(names[:-1]) + f"和{names[-1]}"
 
 
+def _all_topology_page_order(topology_name: str) -> int:
+    order = {
+        "Clos": 0,
+        "2D-FullMesh": 1,
+        "2D-FullMesh-2x4": 2,
+        "2D-Torus": 3,
+        "2D-Torus-BestTwist": 4,
+        "3D-Torus": 5,
+        "3D-Torus-BestTwist": 6,
+        "3D-Torus-2x4x2": 7,
+        "3D-Torus-2x4x2-BestTwist": 8,
+        "3D-Torus-2x4x1": 9,
+        "3D-Torus-2x4x1-BestTwist": 10,
+        "DF": 11,
+        "SparseMesh-Local": 12,
+        "SparseMesh-Global": 13,
+    }
+    return int(order.get(str(topology_name), 10_000))
+
+
 def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict[str, str]]:
     if not results:
         return []
@@ -1536,7 +1563,7 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
     def bisection(item: dict[str, Any] | None) -> float:
         if item is None:
             return 0.0
-        return float(item["structural_metrics"]["per_node_bisection_bandwidth_gbps"])
+        return float(item["structural_metrics"]["bisection_bandwidth_gbps_per_ssu"])
 
     def hops(item: dict[str, Any] | None) -> float:
         if item is None:
@@ -1546,14 +1573,19 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
     def ssu_count(item: dict[str, Any] | None) -> int:
         if item is None:
             return 0
-        return int(item["structural_metrics"]["ssu_count"])
+        return int(item["topology"]["ssu_count"])
 
     clos = get_item("Clos")
     fullmesh = get_item("2D-FullMesh")
+    fullmesh_small = get_item("2D-FullMesh-2x4")
     sparse_global = get_item("SparseMesh-Global")
     sparse_local = get_item("SparseMesh-Local")
     torus2_twist = get_item("2D-Torus-BestTwist")
     torus3_twist = get_item("3D-Torus-BestTwist")
+    torus3_2x4x2 = get_item("3D-Torus-2x4x2")
+    torus3_2x4x2_twist = get_item("3D-Torus-2x4x2-BestTwist")
+    torus3_2x4x1 = get_item("3D-Torus-2x4x1")
+    torus3_2x4x1_twist = get_item("3D-Torus-2x4x1-BestTwist")
     dragonfly = get_item("DF")
     torus3 = get_item("3D-Torus")
     torus2 = get_item("2D-Torus")
@@ -1571,6 +1603,11 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
             first_parts.append(
                 f"{fullmesh['display_name']} 以 {a2a_tp(fullmesh):.0f} Gbps 紧随其后，"
                 f"同样接近零热点，平均跳数只有 {hops(fullmesh):.2f}。"
+            )
+        if fullmesh_small is not None:
+            first_parts.append(
+                f"{fullmesh_small['display_name']} 缩到 2x4 后，每 SSU 对分带宽降到 {bisection(fullmesh_small):.0f} Gbps，"
+                f"A2A 每 SSU 吞吐也回落到 {a2a_tp(fullmesh_small):.0f} Gbps。"
             )
         first_parts.append("这一档的共同特点是后端切分能力强、流量分布均匀，因此 A2A 表现最稳。")
         cards.append(
@@ -1595,6 +1632,21 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
             "SparseMesh 虽然 fanout 只有 6，但单平面直径可控制在 2 跳，路径短、切分能力也不弱，"
             "所以在当前这组规模下，每 SSU 的 A2A 吞吐表现会明显好于常规 Torus。"
         )
+        if torus3_2x4x2_twist is not None or torus3_2x4x1_twist is not None:
+            compact_twist_notes: list[str] = []
+            if torus3_2x4x2_twist is not None:
+                compact_twist_notes.append(
+                    f"{torus3_2x4x2_twist['display_name']} {a2a_tp(torus3_2x4x2_twist):.0f} Gbps"
+                )
+            if torus3_2x4x1_twist is not None:
+                compact_twist_notes.append(
+                    f"{torus3_2x4x1_twist['display_name']} {a2a_tp(torus3_2x4x1_twist):.0f} Gbps"
+                )
+            sparse_parts.append(
+                "同样属于这一档的还有更小规模的 Best Twist 3D-Torus："
+                + "、".join(compact_twist_notes)
+                + "，说明缩小 plane 尺寸后，只要热点能被打散，A2A 仍然可以保持较高效率。"
+            )
         cards.append(
             {
                 "title": "第二档：SparseMesh",
@@ -1616,6 +1668,16 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
                 f"A2A 每 SSU 吞吐从 {a2a_tp(torus3):.0f} 提升到 {a2a_tp(torus3_twist):.0f} Gbps，"
                 f"CV 从 {a2a_cv(torus3):.3f} 降到 {a2a_cv(torus3_twist):.3f}。"
             )
+        if torus3_2x4x2_twist is not None and torus3_2x4x2 is not None:
+            twist_parts.append(
+                f"{torus3_2x4x2_twist['display_name']} 相比 {torus3_2x4x2['display_name']}，"
+                f"A2A 每 SSU 吞吐从 {a2a_tp(torus3_2x4x2):.0f} 提升到 {a2a_tp(torus3_2x4x2_twist):.0f} Gbps。"
+            )
+        if torus3_2x4x1_twist is not None and torus3_2x4x1 is not None:
+            twist_parts.append(
+                f"{torus3_2x4x1_twist['display_name']} 相比 {torus3_2x4x1['display_name']}，"
+                f"A2A 每 SSU 吞吐从 {a2a_tp(torus3_2x4x1):.0f} 提升到 {a2a_tp(torus3_2x4x1_twist):.0f} Gbps。"
+            )
         twist_parts.append(
             "这一档的价值主要体现在 A2A：Twist 不增加端口预算，而是通过重排 wrap 链路把热点打散，"
             "把原始 Torus 的不均衡问题基本消掉。"
@@ -1627,7 +1689,11 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
             }
         )
 
-    fourth_names = [item for item in (dragonfly, torus3, torus2) if item is not None]
+    fourth_names = [
+        item
+        for item in (dragonfly, torus3, torus2, fullmesh_small, torus3_2x4x2, torus3_2x4x1)
+        if item is not None
+    ]
     if fourth_names:
         fourth_parts: list[str] = []
         if dragonfly is not None:
@@ -1640,8 +1706,14 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
             torus_notes.append(f"{torus3['display_name']} {a2a_tp(torus3):.0f} Gbps")
         if torus2 is not None:
             torus_notes.append(f"{torus2['display_name']} {a2a_tp(torus2):.0f} Gbps")
+        if fullmesh_small is not None:
+            torus_notes.append(f"{fullmesh_small['display_name']} {a2a_tp(fullmesh_small):.0f} Gbps")
+        if torus3_2x4x2 is not None:
+            torus_notes.append(f"{torus3_2x4x2['display_name']} {a2a_tp(torus3_2x4x2):.0f} Gbps")
+        if torus3_2x4x1 is not None:
+            torus_notes.append(f"{torus3_2x4x1['display_name']} {a2a_tp(torus3_2x4x1):.0f} Gbps")
         if torus_notes:
-            fourth_parts.append("原始 Torus 的 A2A 每 SSU 吞吐分别为 " + "、".join(torus_notes) + "。")
+            fourth_parts.append("这一档里较受后端切分限制的版本包括 " + "、".join(torus_notes) + "。")
         fourth_parts.append(
             "这一档并不代表拓扑设计差，而是说明当网络规模更大、或者对分带宽和流量均衡度更受限时，"
             "A2A 这种全局最重负载模式会更早暴露后端瓶颈。"
@@ -1741,6 +1813,10 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
 
     html = template.render(
         results=blocks,
+        comparison_results=sorted(
+            blocks,
+            key=lambda item: (_all_topology_page_order(str(item["name"])), str(item["display_name"])),
+        ),
         comparison_summary=_all_topology_comparison_summary(blocks),
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)

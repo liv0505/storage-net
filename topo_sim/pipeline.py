@@ -16,9 +16,12 @@ from .routing import compute_paths, normalize_routing_mode
 from .topologies import (
     available_topologies,
     build_topology,
+    fullmesh_shape,
     is_best_twisted_torus_name,
+    is_fullmesh_topology_name,
     is_sparsemesh_topology_name,
     is_torus_topology_name,
+    torus_shape,
     torus_base_name,
 )
 from .traffic import build_a2a_demands, build_sparse_random_demands, load_custom_traffic_profile
@@ -85,8 +88,29 @@ def _torus_family_name(name: str) -> str | None:
     return torus_base_name(name)
 
 
+def _is_fullmesh_name(name: str) -> bool:
+    return is_fullmesh_topology_name(name)
+
+
 def _is_sparsemesh_name(name: str) -> bool:
     return is_sparsemesh_topology_name(name)
+
+
+def _shape_label(shape: tuple[int, ...]) -> str:
+    return "x".join(str(int(value)) for value in shape)
+
+
+def _backend_ports_per_union(g: nx.Graph) -> int:
+    counts = {
+        sum(
+            int(data.get("parallel_links", 1))
+            for _, _, data in g.edges(node_id, data=True)
+            if data.get("link_kind") == "backend_interconnect"
+        )
+        for node_id, node_data in g.nodes(data=True)
+        if node_data.get("node_role") == "union"
+    }
+    return int(next(iter(counts), 0))
 
 
 def _node_sort_key(node_id: str) -> tuple[int, str, int]:
@@ -289,14 +313,17 @@ def _hardware_assumptions() -> dict[str, Any]:
 
 
 def _topology_scale(name: str, g: nx.Graph) -> str:
-    if name == "2D-FullMesh":
-        return "4 x 4 exchange nodes"
+    if _is_fullmesh_name(name):
+        exchange_shape = tuple(int(value) for value in g.graph.get("fullmesh_exchange_grid_shape", ()))
+        if exchange_shape:
+            return f"{_shape_label(exchange_shape)} exchange nodes"
+        return f"{_shape_label(fullmesh_shape(name))} exchange nodes"
     if _torus_family_name(name) == "2D-Torus":
         logical_unions = int(g.graph.get("logical_plane_union_count", 0))
         logical_ssus = int(g.graph.get("logical_plane_ssu_count", 0))
         plane_count = int(g.graph.get("direct_plane_count", 1))
         exchange_shape = tuple(int(value) for value in g.graph.get("torus_exchange_grid_shape", ()))
-        shape_label = " x ".join(str(value) for value in exchange_shape) if exchange_shape else "torus"
+        shape_label = _shape_label(exchange_shape) if exchange_shape else "torus"
         plane_label = "single torus plane" if plane_count == 1 else f"{plane_count} independent {shape_label} torus planes"
         twist_label = str(g.graph.get("torus_twist_label", "")).strip()
         suffix = f" | {twist_label}" if twist_label else ""
@@ -306,7 +333,7 @@ def _topology_scale(name: str, g: nx.Graph) -> str:
         logical_ssus = int(g.graph.get("logical_plane_ssu_count", 0))
         plane_count = int(g.graph.get("direct_plane_count", 1))
         exchange_shape = tuple(int(value) for value in g.graph.get("torus_exchange_grid_shape", ()))
-        shape_label = " x ".join(str(value) for value in exchange_shape) if exchange_shape else "torus"
+        shape_label = _shape_label(exchange_shape) if exchange_shape else "torus"
         plane_label = "single torus plane" if plane_count == 1 else f"{plane_count} independent {shape_label} torus planes"
         twist_label = str(g.graph.get("torus_twist_label", "")).strip()
         suffix = f" | {twist_label}" if twist_label else ""
@@ -336,28 +363,35 @@ def _topology_scale(name: str, g: nx.Graph) -> str:
 
 
 def _topology_pattern(name: str, g: nx.Graph, cfg: AnalysisConfig) -> str:
-    if name == "2D-FullMesh":
+    if _is_fullmesh_name(name):
+        rows, cols = tuple(int(value) for value in g.graph.get("fullmesh_exchange_grid_shape", fullmesh_shape(name)))
+        x_ports = max(cols - 1, 0)
+        y_ports = max(rows - 1, 0)
         return (
-            "Each Union uses 6 backend ports: 3 row links on the X axis and 3 column links on the Y axis, "
-            "so both Union chips carry the same 4x4 full-mesh structure."
+            f"Each Union uses {x_ports + y_ports} backend ports on one {_shape_label((rows, cols))} full-mesh plane: "
+            f"{x_ports} row links on X and {y_ports} column links on Y, so both Union chips carry the same direct-connect structure."
         )
     if _torus_family_name(name) == "2D-Torus":
+        shape_label = _shape_label(torus_shape(name))
+        backend_ports = _backend_ports_per_union(g)
         if _is_torus_best_twist_name(name):
             return (
-                "Each Union uses 4 backend ports on one 2x4 torus plane, with a fixed best-twist wrap offset "
+                f"Each Union uses {backend_ports} backend ports on one {shape_label} torus plane, with a fixed best-twist wrap offset "
                 "that redistributes wrap traffic more evenly while keeping the same radix and bandwidth budget."
             )
         return (
-            "Each Union uses 4 backend ports on one 2x4 torus plane, and the two Union chips inside each exchange node belong to two independent torus planes with no Union-to-Union local bridge."
+            f"Each Union uses {backend_ports} backend ports on one {shape_label} torus plane, and the two Union chips inside each exchange node belong to two independent torus planes with no Union-to-Union local bridge."
         )
     if _torus_family_name(name) == "3D-Torus":
+        shape_label = _shape_label(torus_shape(name))
+        backend_ports = _backend_ports_per_union(g)
         if _is_torus_best_twist_name(name):
             return (
-                "Each Union uses 6 backend ports on one 2x4x4 torus plane, with a fixed best-twist wrap offset "
+                f"Each Union uses {backend_ports} backend ports on one {shape_label} torus plane, with a fixed best-twist wrap offset "
                 "that smooths wrap hotspots without changing radix or total backend bandwidth."
             )
         return (
-            "Each Union uses 6 backend ports on one 2x4x4 torus plane, and the two Union chips inside each exchange node belong to two independent torus planes with no Union-to-Union local bridge."
+            f"Each Union uses {backend_ports} backend ports on one {shape_label} torus plane, and the two Union chips inside each exchange node belong to two independent torus planes with no Union-to-Union local bridge."
         )
     if _is_df_name(name):
         local_ports = int(g.graph.get("df_local_ports_per_union", 0))
@@ -446,14 +480,9 @@ def _topology_configuration(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict
     elif _is_sparsemesh_name(name):
         backend_ports_per_union = 6
     else:
-        backend_ports_per_union = {
-            "2D-FullMesh": 6,
-            "2D-Torus": 4,
-            "2D-Torus-BestTwist": 4,
-            "3D-Torus": 6,
-            "3D-Torus-BestTwist": 6,
-            "Clos": cfg.clos_uplinks_per_exchange_node,
-        }[name]
+        backend_ports_per_union = (
+            cfg.clos_uplinks_per_exchange_node if name == "Clos" else _backend_ports_per_union(g)
+        )
 
     topology_cfg = {
         "scale": _topology_scale(name, g),
@@ -528,21 +557,24 @@ def _routing_configuration(name: str, cfg: AnalysisConfig) -> dict[str, Any]:
         "inter-exchange SSU traffic is modeled as source SSU -> source Union -> backend topology -> destination Union -> destination SSU",
         "destination-side traffic evenly splits from the two destination Unions down to the target SSU",
     ]
-    if name == "2D-FullMesh":
+    if _is_fullmesh_name(name):
+        rows, cols = fullmesh_shape(name)
         notes.append(
-            "both Union chips expose the same direct-connect backend plane, so routing decisions are evaluated independently on each Union plane"
+            f"both Union chips expose the same direct-connect {_shape_label((rows, cols))} full-mesh plane, so routing decisions are evaluated independently on each Union plane"
         )
     elif _torus_family_name(name) == "2D-Torus":
+        shape_label = _shape_label(torus_shape(name))
         notes.append(
-            "the two Union chips inside each exchange node belong to two independent 2x4 torus planes, so routing evaluates the two planes separately"
+            f"the two Union chips inside each exchange node belong to two independent {shape_label} torus planes, so routing evaluates the two planes separately"
         )
         if _is_torus_best_twist_name(name):
             notes.append(
                 "the wrap edges use a fixed best-twist offset, so deterministic DOR is intentionally not exposed for this topology"
             )
     elif _torus_family_name(name) == "3D-Torus":
+        shape_label = _shape_label(torus_shape(name))
         notes.append(
-            "the two Union chips inside each exchange node belong to two independent 2x4x4 torus planes, so routing evaluates the two planes separately"
+            f"the two Union chips inside each exchange node belong to two independent {shape_label} torus planes, so routing evaluates the two planes separately"
         )
         if _is_torus_best_twist_name(name):
             notes.append(
@@ -563,7 +595,7 @@ def _routing_configuration(name: str, cfg: AnalysisConfig) -> dict[str, Any]:
             notes.append("DOR keeps each Union plane on deterministic dimension-order shortest routing in X -> Y order")
         elif _torus_family_name(name) == "3D-Torus":
             notes.append("DOR keeps each Union plane on deterministic dimension-order shortest routing in X -> Y -> Z order")
-        elif name == "2D-FullMesh":
+        elif _is_fullmesh_name(name):
             notes.append("DOR keeps each Union plane on deterministic dimension-order shortest routing in X -> Y order across the full-mesh axes")
         else:
             notes.append("DOR keeps each Union plane on deterministic dimension-order shortest routing")
@@ -602,7 +634,7 @@ def _exchange_ids(g: nx.Graph) -> list[str]:
 
 
 def _routing_diversity_snapshot(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict[str, Any] | None:
-    if name != "2D-FullMesh" and not _is_torus_name(name):
+    if not _is_fullmesh_name(name) and not _is_torus_name(name):
         return None
     if _is_torus_best_twist_name(name):
         return None
@@ -740,7 +772,7 @@ def _routing_mode_description(mode: str, topology_name: str, cfg: AnalysisConfig
             return "Fixed shortest routing in X -> Y order."
         if _torus_family_name(topology_name) == "3D-Torus":
             return "Fixed shortest routing in X -> Y -> Z order."
-        if topology_name == "2D-FullMesh":
+        if _is_fullmesh_name(topology_name):
             return "Fixed shortest routing that walks X first, then Y."
         return "Fixed shortest routing with deterministic dimension order."
     if mode == "SHORTEST_PATH":

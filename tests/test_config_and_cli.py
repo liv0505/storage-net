@@ -12,10 +12,15 @@ def test_analysis_config_defaults_match_ssu_design():
     cfg = AnalysisConfig()
     assert cfg.topology_names == [
         "2D-FullMesh",
+        "2D-FullMesh-2x4",
         "2D-Torus",
         "2D-Torus-BestTwist",
         "3D-Torus",
         "3D-Torus-BestTwist",
+        "3D-Torus-2x4x2",
+        "3D-Torus-2x4x2-BestTwist",
+        "3D-Torus-2x4x1",
+        "3D-Torus-2x4x1-BestTwist",
         "Clos",
         "DF",
         "SparseMesh-Local",
@@ -63,6 +68,19 @@ def test_parse_args_accepts_best_twist_torus_variants(monkeypatch):
     )
     args = parse_args()
     assert args.topologies == "2D-Torus-BestTwist,3D-Torus-BestTwist"
+
+
+def test_parse_args_accepts_new_fullmesh_and_3d_torus_variants(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "main.py",
+            "--topologies",
+            "2D-FullMesh-2x4,3D-Torus-2x4x2,3D-Torus-2x4x1-BestTwist",
+        ],
+    )
+    args = parse_args()
+    assert args.topologies == "2D-FullMesh-2x4,3D-Torus-2x4x2,3D-Torus-2x4x1-BestTwist"
 
 
 def test_parse_args_accepts_df_variants(monkeypatch):

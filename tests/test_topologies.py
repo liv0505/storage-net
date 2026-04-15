@@ -16,10 +16,15 @@ def _backend_ports_for_union(g, node_id: str) -> int:
 def test_available_topologies_only_exposes_new_names():
     assert available_topologies() == [
         "2D-FullMesh",
+        "2D-FullMesh-2x4",
         "2D-Torus",
         "2D-Torus-BestTwist",
         "3D-Torus",
         "3D-Torus-BestTwist",
+        "3D-Torus-2x4x2",
+        "3D-Torus-2x4x2-BestTwist",
+        "3D-Torus-2x4x1",
+        "3D-Torus-2x4x1-BestTwist",
         "Clos",
         "DF",
         "SparseMesh-Local",
@@ -48,6 +53,17 @@ def test_2d_fullmesh_has_expected_backend_structure():
         if data["link_kind"] == "backend_interconnect"
     ]
     assert len(backend) == 96
+    assert {data["topology_role"] for data in backend} == {"2d_fullmesh_x", "2d_fullmesh_y"}
+
+
+def test_2d_fullmesh_2x4_has_expected_backend_structure():
+    g = build_topology("2D-FullMesh-2x4", AnalysisConfig())
+    backend = [
+        data
+        for _, _, data in g.edges(data=True)
+        if data["link_kind"] == "backend_interconnect"
+    ]
+    assert len(backend) == 32
     assert {data["topology_role"] for data in backend} == {"2d_fullmesh_x", "2d_fullmesh_y"}
 
 
@@ -88,6 +104,21 @@ def test_2d_fullmesh_gives_each_union_six_backend_ports():
     assert set(union_backend_degree.values()) == {6}
 
 
+def test_2d_fullmesh_2x4_gives_each_union_four_backend_ports():
+    g = build_topology("2D-FullMesh-2x4", AnalysisConfig())
+    union_backend_degree = {
+        node_id: sum(
+            1
+            for _, _, data in g.edges(node_id, data=True)
+            if data["link_kind"] == "backend_interconnect"
+        )
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {4}
+
+
 def test_2d_torus_gives_each_union_four_backend_ports():
     g = build_topology("2D-Torus", AnalysisConfig())
     union_backend_degree = {
@@ -108,6 +139,28 @@ def test_3d_torus_gives_each_union_six_backend_ports():
     }
     assert union_backend_degree
     assert set(union_backend_degree.values()) == {6}
+
+
+def test_3d_torus_2x4x2_gives_each_union_six_backend_ports():
+    g = build_topology("3D-Torus-2x4x2", AnalysisConfig())
+    union_backend_degree = {
+        node_id: _backend_ports_for_union(g, node_id)
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {6}
+
+
+def test_3d_torus_2x4x1_gives_each_union_four_backend_ports():
+    g = build_topology("3D-Torus-2x4x1", AnalysisConfig())
+    union_backend_degree = {
+        node_id: _backend_ports_for_union(g, node_id)
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {4}
 
 
 def test_clos_uses_18_exchange_nodes_with_plane_local_uplinks():
@@ -425,10 +478,15 @@ def test_df_variants_share_ssus_across_two_backend_plane_components(
         ("name", "expected_ssus", "expected_unions", "expected_ssu_union_links", "expected_union_union_links"),
     [
         ("2D-FullMesh", 128, 32, 256, 96),
+        ("2D-FullMesh-2x4", 64, 16, 128, 32),
         ("2D-Torus", 64, 16, 128, 32),
         ("2D-Torus-BestTwist", 64, 16, 128, 32),
         ("3D-Torus", 256, 64, 512, 192),
         ("3D-Torus-BestTwist", 256, 64, 512, 192),
+        ("3D-Torus-2x4x2", 128, 32, 256, 96),
+        ("3D-Torus-2x4x2-BestTwist", 128, 32, 256, 96),
+        ("3D-Torus-2x4x1", 64, 16, 128, 32),
+        ("3D-Torus-2x4x1-BestTwist", 64, 16, 128, 32),
         ("Clos", 144, 36, 288, 144),
         ("DF", 416, 104, 832, 312),
         ("DF-Shuffled", 416, 104, 832, 312),

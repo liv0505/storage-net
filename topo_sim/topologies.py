@@ -17,6 +17,10 @@ _MAX_CLOS_UPLINKS_PER_PLANE = 6
 _CLOS_EXCHANGE_NODE_COUNT = 18
 _MIN_DF_UNIONS_PER_SERVER = 2
 _MIN_DF_RING_UNIONS_PER_SERVER = 4
+_FULLMESH_SHAPES: dict[str, tuple[int, int]] = {
+    "2D-FullMesh": (4, 4),
+    "2D-FullMesh-2x4": (2, 4),
+}
 _SPARSEMESH_VARIANTS: dict[str, dict[str, int | bool]] = {
     "SparseMesh-Local": {
         "sparsity": 5,
@@ -32,15 +36,31 @@ _SPARSEMESH_VARIANTS: dict[str, dict[str, int | bool]] = {
 _TORUS_SHAPES: dict[str, tuple[int, ...]] = {
     "2D-Torus": (2, 4),
     "3D-Torus": (2, 4, 4),
+    "3D-Torus-2x4x2": (2, 4, 2),
+    "3D-Torus-2x4x1": (2, 4, 1),
 }
 _TORUS_BEST_TWIST_OFFSETS: dict[str, tuple[tuple[int, ...], ...]] = {
     "2D-Torus-BestTwist": ((0, 2), (0, 0)),
     "3D-Torus-BestTwist": ((0, 2, 2), (0, 0, 0), (0, 0, 0)),
+    "3D-Torus-2x4x2-BestTwist": ((0, 0, 1), (1, 0, 1), (0, 2, 0)),
+    "3D-Torus-2x4x1-BestTwist": ((0, 2, 0), (0, 0, 0), (0, 0, 0)),
 }
-_TORUS_VARIANT_BASE_NAMES: dict[str, str] = {
+_TORUS_VARIANT_SHAPE_NAMES: dict[str, str] = {
     **{name: name for name in _TORUS_SHAPES},
     "2D-Torus-BestTwist": "2D-Torus",
     "3D-Torus-BestTwist": "3D-Torus",
+    "3D-Torus-2x4x2-BestTwist": "3D-Torus-2x4x2",
+    "3D-Torus-2x4x1-BestTwist": "3D-Torus-2x4x1",
+}
+_TORUS_VARIANT_FAMILY_NAMES: dict[str, str] = {
+    "2D-Torus": "2D-Torus",
+    "2D-Torus-BestTwist": "2D-Torus",
+    "3D-Torus": "3D-Torus",
+    "3D-Torus-BestTwist": "3D-Torus",
+    "3D-Torus-2x4x2": "3D-Torus",
+    "3D-Torus-2x4x2-BestTwist": "3D-Torus",
+    "3D-Torus-2x4x1": "3D-Torus",
+    "3D-Torus-2x4x1-BestTwist": "3D-Torus",
 }
 
 
@@ -49,10 +69,42 @@ def torus_base_name(topology_name: str) -> str | None:
         return None
 
     normalized = topology_name.strip().lower()
-    for variant_name, base_name in _TORUS_VARIANT_BASE_NAMES.items():
+    for variant_name, family_name in _TORUS_VARIANT_FAMILY_NAMES.items():
         if variant_name.lower() == normalized:
-            return base_name
+            return family_name
     return None
+
+
+def _torus_shape_variant_name(topology_name: str) -> str | None:
+    if not isinstance(topology_name, str):
+        return None
+
+    normalized = topology_name.strip().lower()
+    for variant_name, shape_name in _TORUS_VARIANT_SHAPE_NAMES.items():
+        if variant_name.lower() == normalized:
+            return shape_name
+    return None
+
+
+def is_fullmesh_topology_name(topology_name: str) -> bool:
+    if not isinstance(topology_name, str):
+        return False
+    normalized = topology_name.strip().lower()
+    return any(name.lower() == normalized for name in _FULLMESH_SHAPES)
+
+
+def fullmesh_shape(topology_name: str) -> tuple[int, int]:
+    if not isinstance(topology_name, str):
+        valid = ", ".join(sorted(_FULLMESH_SHAPES))
+        raise ValueError(f"Unsupported fullmesh topology '{topology_name}'. Valid: {valid}")
+
+    normalized = topology_name.strip().lower()
+    for variant_name, shape in _FULLMESH_SHAPES.items():
+        if variant_name.lower() == normalized:
+            return tuple(int(value) for value in shape)
+
+    valid = ", ".join(sorted(_FULLMESH_SHAPES))
+    raise ValueError(f"Unsupported fullmesh topology '{topology_name}'. Valid: {valid}")
 
 
 def is_torus_topology_name(topology_name: str) -> bool:
@@ -92,27 +144,15 @@ def _iter_backend_edges(g: nx.Graph) -> Iterator[tuple[str, str, dict]]:
 
 
 def _validate_backend_uniformity(g: nx.Graph, topology_name: str) -> None:
-    role_counts: dict[str, int] = {}
     uplinks_by_exchange: dict[str, int] = {}
 
     for u, v, data in _iter_backend_edges(g):
-        role = str(data.get("topology_role", "backend_interconnect"))
-        if not role.endswith("_local"):
-            role_counts[role] = role_counts.get(role, 0) + 1
-
         for node in (u, v):
             exchange_node_id = g.nodes[node].get("exchange_node_id")
             if exchange_node_id is not None:
                 uplinks_by_exchange[exchange_node_id] = (
                     uplinks_by_exchange.get(exchange_node_id, 0) + 1
                 )
-
-    is_df_family = topology_name.upper() == "DF" or topology_name.upper().startswith("DF-")
-    is_single_plane_torus = is_torus_topology_name(topology_name)
-    if not is_df_family and not is_single_plane_torus and len(role_counts) > 1 and len(set(role_counts.values())) != 1:
-        raise ValueError(
-            f"{topology_name} backend directions must stay uniform, got role counts: {role_counts}"
-        )
 
     if uplinks_by_exchange and len(set(uplinks_by_exchange.values())) != 1:
         raise ValueError(
@@ -478,6 +518,8 @@ def _build_dual_plane_torus(
         for coord in _iter_grid_coords(shape):
             src_union = exchanges[coord]["unions"][union_index]
             for axis in range(axis_count):
+                if int(shape[axis]) <= 1:
+                    continue
                 dst_coord = _torus_next_coord(coord, shape, axis, normalized_wrap_offsets)
                 dst_union = exchanges[dst_coord]["unions"][union_index]
                 axis_wrap_offsets = normalized_wrap_offsets[axis]
@@ -502,6 +544,8 @@ def _build_dual_plane_torus(
     g.graph["logical_plane_ssu_count"] = math.prod(shape) * 8
     g.graph["torus_exchange_grid_shape"] = tuple(int(value) for value in shape)
     g.graph["torus_wrap_offsets"] = normalized_wrap_offsets
+    g.graph["direct_topology_kind"] = "2D-TORUS" if topology_kind == "2D-Torus" else "3D-TORUS"
+    g.graph["topology_family"] = "TORUS"
     g.graph["torus_twisted"] = any(
         int(offset) != 0
         for axis_offsets in normalized_wrap_offsets
@@ -870,16 +914,22 @@ def _build_sparsemesh_variant(
     return _annotate_graph(g, cfg)
 
 
-def build_2d_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
+def _build_2d_fullmesh_variant(
+    cfg: AnalysisConfig,
+    *,
+    topology_key: str,
+    rows: int,
+    cols: int,
+) -> nx.Graph:
     g = nx.Graph()
-    rows = 4
-    cols = 4
     exchanges: dict[tuple[int, int], dict[str, list[str]]] = {}
 
     for r in range(rows):
         for c in range(cols):
             exchange_id = f"en{r * cols + c}"
-            exchanges[(r, c)] = _add_exchange_node(g, exchange_id, cfg)
+            exchange = _add_exchange_node(g, exchange_id, cfg)
+            _set_exchange_grid_coord(g, exchange, (r, c))
+            exchanges[(r, c)] = exchange
 
     for union_index in range(2):
         for r in range(rows):
@@ -906,7 +956,31 @@ def build_2d_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
     g.graph["direct_plane_count"] = 2
     g.graph["logical_plane_union_count"] = rows * cols * 2
     g.graph["logical_plane_ssu_count"] = rows * cols * 8
+    g.graph["fullmesh_exchange_grid_shape"] = (rows, cols)
+    g.graph["direct_topology_kind"] = "2D-FULLMESH"
+    g.graph["topology_family"] = "FULLMESH"
+    g.graph["topology_variant"] = topology_key
     return _annotate_graph(g, cfg)
+
+
+def build_2d_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
+    rows, cols = _FULLMESH_SHAPES["2D-FullMesh"]
+    return _build_2d_fullmesh_variant(
+        cfg,
+        topology_key="2D-FullMesh",
+        rows=int(rows),
+        cols=int(cols),
+    )
+
+
+def build_2d_fullmesh_2x4(cfg: AnalysisConfig) -> nx.Graph:
+    rows, cols = _FULLMESH_SHAPES["2D-FullMesh-2x4"]
+    return _build_2d_fullmesh_variant(
+        cfg,
+        topology_key="2D-FullMesh-2x4",
+        rows=int(rows),
+        cols=int(cols),
+    )
 
 
 def build_2d_torus(cfg: AnalysisConfig) -> nx.Graph:
@@ -918,12 +992,12 @@ def build_3d_torus(cfg: AnalysisConfig) -> nx.Graph:
 
 
 def torus_shape(topology_name: str) -> tuple[int, ...]:
-    base_name = torus_base_name(topology_name)
-    if base_name is None:
-        valid = ", ".join(sorted(_TORUS_VARIANT_BASE_NAMES))
+    shape_name = _torus_shape_variant_name(topology_name)
+    if shape_name is None:
+        valid = ", ".join(sorted(_TORUS_VARIANT_SHAPE_NAMES))
         raise ValueError(f"Unsupported torus topology '{topology_name}'. Valid: {valid}")
 
-    return tuple(int(value) for value in _TORUS_SHAPES[base_name])
+    return tuple(int(value) for value in _TORUS_SHAPES[shape_name])
 
 
 def build_twisted_torus(
@@ -933,18 +1007,19 @@ def build_twisted_torus(
     wrap_offsets_by_axis: tuple[tuple[int, ...], ...] | None = None,
 ) -> nx.Graph:
     shape = torus_shape(topology_name)
-    canonical_name = torus_base_name(topology_name)
-    if canonical_name is None:
-        valid = ", ".join(sorted(_TORUS_VARIANT_BASE_NAMES))
+    family_name = torus_base_name(topology_name)
+    if family_name is None:
+        valid = ", ".join(sorted(_TORUS_VARIANT_FAMILY_NAMES))
         raise ValueError(f"Unsupported torus topology '{topology_name}'. Valid: {valid}")
     g = _build_dual_plane_torus(
         cfg,
-        topology_kind=canonical_name,
+        topology_kind=family_name,
         shape=shape,
         wrap_offsets_by_axis=wrap_offsets_by_axis,
     )
-    g.graph["topology_name"] = canonical_name
-    _validate_backend_uniformity(g, canonical_name)
+    g.graph["topology_name"] = family_name
+    g.graph["torus_shape_variant"] = _torus_shape_variant_name(topology_name)
+    _validate_backend_uniformity(g, family_name)
     return g
 
 
@@ -965,6 +1040,34 @@ def build_3d_torus_best_twist(cfg: AnalysisConfig) -> nx.Graph:
         wrap_offsets_by_axis=_TORUS_BEST_TWIST_OFFSETS["3D-Torus-BestTwist"],
     )
     g.graph["torus_twist_label"] = "axis0=[0, 2, 2] | axis1=[0, 0, 0] | axis2=[0, 0, 0]"
+    return g
+
+
+def build_3d_torus_2x4x2(cfg: AnalysisConfig) -> nx.Graph:
+    return build_twisted_torus(cfg, "3D-Torus-2x4x2")
+
+
+def build_3d_torus_2x4x2_best_twist(cfg: AnalysisConfig) -> nx.Graph:
+    g = build_twisted_torus(
+        cfg,
+        "3D-Torus-2x4x2",
+        wrap_offsets_by_axis=_TORUS_BEST_TWIST_OFFSETS["3D-Torus-2x4x2-BestTwist"],
+    )
+    g.graph["torus_twist_label"] = "axis0=[0, 0, 1] | axis1=[1, 0, 1] | axis2=[0, 2, 0]"
+    return g
+
+
+def build_3d_torus_2x4x1(cfg: AnalysisConfig) -> nx.Graph:
+    return build_twisted_torus(cfg, "3D-Torus-2x4x1")
+
+
+def build_3d_torus_2x4x1_best_twist(cfg: AnalysisConfig) -> nx.Graph:
+    g = build_twisted_torus(
+        cfg,
+        "3D-Torus-2x4x1",
+        wrap_offsets_by_axis=_TORUS_BEST_TWIST_OFFSETS["3D-Torus-2x4x1-BestTwist"],
+    )
+    g.graph["torus_twist_label"] = "axis0=[0, 2, 0] | axis1=[0, 0, 0] | axis2=[0, 0, 0]"
     return g
 
 
@@ -1091,10 +1194,15 @@ def build_sparsemesh_global(cfg: AnalysisConfig) -> nx.Graph:
 
 BUILDERS: dict[str, TopologyBuilder] = {
     "2D-FullMesh": build_2d_fullmesh,
+    "2D-FullMesh-2x4": build_2d_fullmesh_2x4,
     "2D-Torus": build_2d_torus,
     "2D-Torus-BestTwist": build_2d_torus_best_twist,
     "3D-Torus": build_3d_torus,
     "3D-Torus-BestTwist": build_3d_torus_best_twist,
+    "3D-Torus-2x4x2": build_3d_torus_2x4x2,
+    "3D-Torus-2x4x2-BestTwist": build_3d_torus_2x4x2_best_twist,
+    "3D-Torus-2x4x1": build_3d_torus_2x4x1,
+    "3D-Torus-2x4x1-BestTwist": build_3d_torus_2x4x1_best_twist,
     "Clos": build_clos,
     "DF": build_df,
     "SparseMesh-Local": build_sparsemesh_local,
