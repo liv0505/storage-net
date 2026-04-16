@@ -19,6 +19,7 @@ from .traffic import build_a2a_demands
 _SUPPORTED_TORUS_TOPOLOGIES = (
     "2D-Torus",
     "3D-Torus",
+    "3D-Torus-2x4x3",
     "3D-Torus-2x4x2",
     "3D-Torus-2x4x1",
 )
@@ -92,6 +93,7 @@ def generate_google_torus_twist_candidates(topology_name: str) -> list[TorusTwis
     ]
 
     candidates: list[TorusTwistSpec] = []
+    validation_cfg = AnalysisConfig()
     for axis_bundle in product(*per_axis_candidates):
         wrap_offsets_by_axis = tuple(
             tuple(int(value) for value in axis_offsets)
@@ -101,15 +103,22 @@ def generate_google_torus_twist_candidates(topology_name: str) -> list[TorusTwis
             all(int(offset) == 0 for offset in axis_offsets)
             for axis_offsets in wrap_offsets_by_axis
         )
-        candidates.append(
-            TorusTwistSpec(
-                topology_name=canonical_name,
-                shape=shape,
-                wrap_offsets_by_axis=wrap_offsets_by_axis,
-                label=_wrap_offsets_label(wrap_offsets_by_axis),
-                is_baseline=is_baseline,
-            )
+        spec = TorusTwistSpec(
+            topology_name=canonical_name,
+            shape=shape,
+            wrap_offsets_by_axis=wrap_offsets_by_axis,
+            label=_wrap_offsets_label(wrap_offsets_by_axis),
+            is_baseline=is_baseline,
         )
+        try:
+            build_twisted_torus(
+                validation_cfg,
+                canonical_name,
+                wrap_offsets_by_axis=wrap_offsets_by_axis,
+            )
+        except ValueError:
+            continue
+        candidates.append(spec)
 
     candidates.sort(
         key=lambda spec: (

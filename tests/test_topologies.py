@@ -21,6 +21,8 @@ def test_available_topologies_only_exposes_new_names():
         "2D-Torus-BestTwist",
         "3D-Torus",
         "3D-Torus-BestTwist",
+        "3D-Torus-2x4x3",
+        "3D-Torus-2x4x3-BestTwist",
         "3D-Torus-2x4x2",
         "3D-Torus-2x4x2-BestTwist",
         "3D-Torus-2x4x1",
@@ -143,6 +145,17 @@ def test_3d_torus_gives_each_union_six_backend_ports():
 
 def test_3d_torus_2x4x2_gives_each_union_six_backend_ports():
     g = build_topology("3D-Torus-2x4x2", AnalysisConfig())
+    union_backend_degree = {
+        node_id: _backend_ports_for_union(g, node_id)
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {6}
+
+
+def test_3d_torus_2x4x3_gives_each_union_six_backend_ports():
+    g = build_topology("3D-Torus-2x4x3", AnalysisConfig())
     union_backend_degree = {
         node_id: _backend_ports_for_union(g, node_id)
         for node_id, node_data in g.nodes(data=True)
@@ -483,6 +496,8 @@ def test_df_variants_share_ssus_across_two_backend_plane_components(
         ("2D-Torus-BestTwist", 64, 16, 128, 32),
         ("3D-Torus", 256, 64, 512, 192),
         ("3D-Torus-BestTwist", 256, 64, 512, 192),
+        ("3D-Torus-2x4x3", 192, 48, 384, 144),
+        ("3D-Torus-2x4x3-BestTwist", 192, 48, 384, 144),
         ("3D-Torus-2x4x2", 128, 32, 256, 96),
         ("3D-Torus-2x4x2-BestTwist", 128, 32, 256, 96),
         ("3D-Torus-2x4x1", 64, 16, 128, 32),

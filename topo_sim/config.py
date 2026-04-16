@@ -14,6 +14,8 @@ class AnalysisConfig:
             "2D-Torus-BestTwist",
             "3D-Torus",
             "3D-Torus-BestTwist",
+            "3D-Torus-2x4x3",
+            "3D-Torus-2x4x3-BestTwist",
             "3D-Torus-2x4x2",
             "3D-Torus-2x4x2-BestTwist",
             "3D-Torus-2x4x1",

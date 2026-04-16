@@ -36,12 +36,14 @@ _SPARSEMESH_VARIANTS: dict[str, dict[str, int | bool]] = {
 _TORUS_SHAPES: dict[str, tuple[int, ...]] = {
     "2D-Torus": (2, 4),
     "3D-Torus": (2, 4, 4),
+    "3D-Torus-2x4x3": (2, 4, 3),
     "3D-Torus-2x4x2": (2, 4, 2),
     "3D-Torus-2x4x1": (2, 4, 1),
 }
 _TORUS_BEST_TWIST_OFFSETS: dict[str, tuple[tuple[int, ...], ...]] = {
     "2D-Torus-BestTwist": ((0, 2), (0, 0)),
     "3D-Torus-BestTwist": ((0, 2, 2), (0, 0, 0), (0, 0, 0)),
+    "3D-Torus-2x4x3-BestTwist": ((0, 2, 0), (0, 0, 0), (0, 0, 0)),
     "3D-Torus-2x4x2-BestTwist": ((0, 0, 1), (1, 0, 1), (0, 2, 0)),
     "3D-Torus-2x4x1-BestTwist": ((0, 2, 0), (0, 0, 0), (0, 0, 0)),
 }
@@ -49,6 +51,7 @@ _TORUS_VARIANT_SHAPE_NAMES: dict[str, str] = {
     **{name: name for name in _TORUS_SHAPES},
     "2D-Torus-BestTwist": "2D-Torus",
     "3D-Torus-BestTwist": "3D-Torus",
+    "3D-Torus-2x4x3-BestTwist": "3D-Torus-2x4x3",
     "3D-Torus-2x4x2-BestTwist": "3D-Torus-2x4x2",
     "3D-Torus-2x4x1-BestTwist": "3D-Torus-2x4x1",
 }
@@ -57,6 +60,8 @@ _TORUS_VARIANT_FAMILY_NAMES: dict[str, str] = {
     "2D-Torus-BestTwist": "2D-Torus",
     "3D-Torus": "3D-Torus",
     "3D-Torus-BestTwist": "3D-Torus",
+    "3D-Torus-2x4x3": "3D-Torus",
+    "3D-Torus-2x4x3-BestTwist": "3D-Torus",
     "3D-Torus-2x4x2": "3D-Torus",
     "3D-Torus-2x4x2-BestTwist": "3D-Torus",
     "3D-Torus-2x4x1": "3D-Torus",
@@ -1047,6 +1052,20 @@ def build_3d_torus_2x4x2(cfg: AnalysisConfig) -> nx.Graph:
     return build_twisted_torus(cfg, "3D-Torus-2x4x2")
 
 
+def build_3d_torus_2x4x3(cfg: AnalysisConfig) -> nx.Graph:
+    return build_twisted_torus(cfg, "3D-Torus-2x4x3")
+
+
+def build_3d_torus_2x4x3_best_twist(cfg: AnalysisConfig) -> nx.Graph:
+    g = build_twisted_torus(
+        cfg,
+        "3D-Torus-2x4x3",
+        wrap_offsets_by_axis=_TORUS_BEST_TWIST_OFFSETS["3D-Torus-2x4x3-BestTwist"],
+    )
+    g.graph["torus_twist_label"] = "axis0=[0, 2, 0] | axis1=[0, 0, 0] | axis2=[0, 0, 0]"
+    return g
+
+
 def build_3d_torus_2x4x2_best_twist(cfg: AnalysisConfig) -> nx.Graph:
     g = build_twisted_torus(
         cfg,
@@ -1199,6 +1218,8 @@ BUILDERS: dict[str, TopologyBuilder] = {
     "2D-Torus-BestTwist": build_2d_torus_best_twist,
     "3D-Torus": build_3d_torus,
     "3D-Torus-BestTwist": build_3d_torus_best_twist,
+    "3D-Torus-2x4x3": build_3d_torus_2x4x3,
+    "3D-Torus-2x4x3-BestTwist": build_3d_torus_2x4x3_best_twist,
     "3D-Torus-2x4x2": build_3d_torus_2x4x2,
     "3D-Torus-2x4x2-BestTwist": build_3d_torus_2x4x2_best_twist,
     "3D-Torus-2x4x1": build_3d_torus_2x4x1,

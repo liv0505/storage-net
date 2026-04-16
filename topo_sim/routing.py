@@ -67,7 +67,7 @@ def compute_paths(
         return _compute_same_exchange_internal_paths(g, src_ssu, dst_ssu, mode)
 
     if _is_df_topology(g):
-        return _compute_df_paths(g, src_ssu, dst_ssu)
+        return _compute_df_paths(g, src_ssu, dst_ssu, mode)
 
     if _is_single_plane_direct_torus(g):
         try:
@@ -671,7 +671,15 @@ def _df_shortest_backend_union_paths(
     return selected_paths
 
 
-def _compute_df_paths(g: nx.Graph, src_ssu: str, dst_ssu: str) -> list[RoutedPath]:
+def _compute_df_paths(
+    g: nx.Graph,
+    src_ssu: str,
+    dst_ssu: str,
+    mode: str,
+) -> list[RoutedPath]:
+    if mode == "SHORTEST_PATH":
+        return _compute_df_paths_via_backend_shortest(g, src_ssu, dst_ssu)
+
     if _df_local_topology(g) in {"pair_double", "pair_triple"}:
         return _compute_df_paths_via_backend_shortest(g, src_ssu, dst_ssu)
 

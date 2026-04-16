@@ -1,4 +1,5 @@
-﻿import pytest
+﻿import networkx as nx
+import pytest
 
 from topo_sim.config import AnalysisConfig
 from topo_sim.routing import compute_paths, normalize_routing_mode
@@ -236,22 +237,45 @@ def test_df_cross_server_routing_uses_one_unique_inter_server_link_with_local_sp
     } == {("df_server_fullmesh", "df_inter_server", "df_server_fullmesh")}
 
 
-def test_df_shuffled_cross_server_routing_keeps_one_inter_server_backend_edge():
-    g = build_topology("DF-Shuffled", AnalysisConfig())
+def test_df_shortest_path_uses_true_backend_min_hop_route():
+    g = build_topology("DF", AnalysisConfig())
+    src_ssu = "en10:ssu0"
+    dst_ssu = "en14:ssu0"
     paths = compute_paths(
         g,
-        "en1:ssu0",
-        "en4:ssu0",
+        src_ssu,
+        dst_ssu,
+        routing_mode="SHORTEST_PATH",
+        cfg=AnalysisConfig(),
+    )
+
+    expected_paths = {
+        tuple(path_nodes) for path_nodes in nx.all_shortest_paths(g, src_ssu, dst_ssu)
+    }
+
+    assert {path.nodes for path in paths} == expected_paths
+    assert {path.hops for path in paths} == {nx.shortest_path_length(g, src_ssu, dst_ssu)}
+    assert {round(path.weight, 8) for path in paths} == {round(1.0 / len(expected_paths), 8)}
+
+
+def test_df_shuffled_cross_server_routing_keeps_one_inter_server_backend_edge():
+    g = build_topology("DF-Shuffled", AnalysisConfig())
+    src_ssu = "en1:ssu0"
+    dst_ssu = "en4:ssu0"
+    paths = compute_paths(
+        g,
+        src_ssu,
+        dst_ssu,
         routing_mode="SHORTEST_PATH",
         cfg=AnalysisConfig(),
     )
 
     assert paths
     assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
-    for path in paths:
-        roles = _backend_roles_for_path(g, path.nodes)
-        assert roles.count("df_inter_server") == 1
-        assert set(roles) <= {"df_server_fullmesh", "df_inter_server"}
+    assert {
+        path.nodes for path in paths
+    } == {tuple(path_nodes) for path_nodes in nx.all_shortest_paths(g, src_ssu, dst_ssu)}
+    assert {path.hops for path in paths} == {nx.shortest_path_length(g, src_ssu, dst_ssu)}
 
 
 def test_df_scaleup_same_server_paths_follow_ring_shortest_choices():

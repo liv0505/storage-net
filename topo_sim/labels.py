@@ -10,6 +10,8 @@ _TOPOLOGY_DISPLAY_NAMES = {
     "2D-FullMesh-2x4": "2D-FullMesh 2x4",
     "2D-Torus-BestTwist": "2D-Torus Best Twist",
     "3D-Torus-BestTwist": "3D-Torus Best Twist",
+    "3D-Torus-2x4x3": "3D-Torus 2x4x3",
+    "3D-Torus-2x4x3-BestTwist": "3D-Torus 2x4x3 Best Twist",
     "3D-Torus-2x4x2": "3D-Torus 2x4x2",
     "3D-Torus-2x4x2-BestTwist": "3D-Torus 2x4x2 Best Twist",
     "3D-Torus-2x4x1": "3D-Torus 2x4x1",

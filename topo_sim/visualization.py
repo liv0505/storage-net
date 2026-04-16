@@ -1093,6 +1093,13 @@ def _topology_subtitle(
     )
 
 
+def _topology_figure_annotations(
+    g: nx.Graph,
+    topology_name: str,
+) -> list[dict[str, Any]]:
+    return []
+
+
 def _apply_figure_layout(
     fig: go.Figure,
     title: str,
@@ -1442,6 +1449,8 @@ def create_topology_figure(
         clickmode="event",
         legend_position="right",
     )
+    for annotation in _topology_figure_annotations(g, topology_name):
+        fig.add_annotation(**annotation)
 
     interaction = _build_interaction_payload(
         g,
@@ -1530,13 +1539,15 @@ def _all_topology_page_order(topology_name: str) -> int:
         "2D-Torus-BestTwist": 4,
         "3D-Torus": 5,
         "3D-Torus-BestTwist": 6,
-        "3D-Torus-2x4x2": 7,
-        "3D-Torus-2x4x2-BestTwist": 8,
-        "3D-Torus-2x4x1": 9,
-        "3D-Torus-2x4x1-BestTwist": 10,
-        "DF": 11,
-        "SparseMesh-Local": 12,
-        "SparseMesh-Global": 13,
+        "3D-Torus-2x4x3": 7,
+        "3D-Torus-2x4x3-BestTwist": 8,
+        "3D-Torus-2x4x2": 9,
+        "3D-Torus-2x4x2-BestTwist": 10,
+        "3D-Torus-2x4x1": 11,
+        "3D-Torus-2x4x1-BestTwist": 12,
+        "DF": 13,
+        "SparseMesh-Local": 14,
+        "SparseMesh-Global": 15,
     }
     return int(order.get(str(topology_name), 10_000))
 
@@ -1582,6 +1593,8 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
     sparse_local = get_item("SparseMesh-Local")
     torus2_twist = get_item("2D-Torus-BestTwist")
     torus3_twist = get_item("3D-Torus-BestTwist")
+    torus3_2x4x3 = get_item("3D-Torus-2x4x3")
+    torus3_2x4x3_twist = get_item("3D-Torus-2x4x3-BestTwist")
     torus3_2x4x2 = get_item("3D-Torus-2x4x2")
     torus3_2x4x2_twist = get_item("3D-Torus-2x4x2-BestTwist")
     torus3_2x4x1 = get_item("3D-Torus-2x4x1")
@@ -1632,8 +1645,16 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
             "SparseMesh 虽然 fanout 只有 6，但单平面直径可控制在 2 跳，路径短、切分能力也不弱，"
             "所以在当前这组规模下，每 SSU 的 A2A 吞吐表现会明显好于常规 Torus。"
         )
-        if torus3_2x4x2_twist is not None or torus3_2x4x1_twist is not None:
+        if (
+            torus3_2x4x3_twist is not None
+            or torus3_2x4x2_twist is not None
+            or torus3_2x4x1_twist is not None
+        ):
             compact_twist_notes: list[str] = []
+            if torus3_2x4x3_twist is not None:
+                compact_twist_notes.append(
+                    f"{torus3_2x4x3_twist['display_name']} {a2a_tp(torus3_2x4x3_twist):.0f} Gbps"
+                )
             if torus3_2x4x2_twist is not None:
                 compact_twist_notes.append(
                     f"{torus3_2x4x2_twist['display_name']} {a2a_tp(torus3_2x4x2_twist):.0f} Gbps"
@@ -1668,6 +1689,11 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
                 f"A2A 每 SSU 吞吐从 {a2a_tp(torus3):.0f} 提升到 {a2a_tp(torus3_twist):.0f} Gbps，"
                 f"CV 从 {a2a_cv(torus3):.3f} 降到 {a2a_cv(torus3_twist):.3f}。"
             )
+        if torus3_2x4x3_twist is not None and torus3_2x4x3 is not None:
+            twist_parts.append(
+                f"{torus3_2x4x3_twist['display_name']} 相比 {torus3_2x4x3['display_name']}，"
+                f"A2A 每 SSU 吞吐从 {a2a_tp(torus3_2x4x3):.0f} 提升到 {a2a_tp(torus3_2x4x3_twist):.0f} Gbps。"
+            )
         if torus3_2x4x2_twist is not None and torus3_2x4x2 is not None:
             twist_parts.append(
                 f"{torus3_2x4x2_twist['display_name']} 相比 {torus3_2x4x2['display_name']}，"
@@ -1691,7 +1717,15 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
 
     fourth_names = [
         item
-        for item in (dragonfly, torus3, torus2, fullmesh_small, torus3_2x4x2, torus3_2x4x1)
+        for item in (
+            dragonfly,
+            torus3,
+            torus2,
+            fullmesh_small,
+            torus3_2x4x3,
+            torus3_2x4x2,
+            torus3_2x4x1,
+        )
         if item is not None
     ]
     if fourth_names:
@@ -1708,6 +1742,8 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
             torus_notes.append(f"{torus2['display_name']} {a2a_tp(torus2):.0f} Gbps")
         if fullmesh_small is not None:
             torus_notes.append(f"{fullmesh_small['display_name']} {a2a_tp(fullmesh_small):.0f} Gbps")
+        if torus3_2x4x3 is not None:
+            torus_notes.append(f"{torus3_2x4x3['display_name']} {a2a_tp(torus3_2x4x3):.0f} Gbps")
         if torus3_2x4x2 is not None:
             torus_notes.append(f"{torus3_2x4x2['display_name']} {a2a_tp(torus3_2x4x2):.0f} Gbps")
         if torus3_2x4x1 is not None:
