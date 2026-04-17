@@ -93,6 +93,10 @@ def _is_sparsemesh_topology(g: nx.Graph) -> bool:
     return topology_name.startswith("SPARSEMESH")
 
 
+def _has_exchange_projection_fast_path(g: nx.Graph) -> bool:
+    return bool(g.graph.get("exchange_projection_fast_path", False))
+
+
 def _server_id(g: nx.Graph, node_id: str) -> int | None:
     value = g.nodes[node_id].get("server_id")
     if value is None:
@@ -528,6 +532,8 @@ def _should_use_exact_shortest_path_fast_path(g: nx.Graph, routing_mode: str) ->
 
 
 def _should_use_direct_projection_fast_path(g: nx.Graph, routing_mode: str) -> bool:
+    if _has_exchange_projection_fast_path(g):
+        return True
     if bool(g.graph.get("torus_twisted", False)):
         return False
     mode = normalize_routing_mode(routing_mode)

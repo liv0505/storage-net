@@ -38,6 +38,11 @@ def _is_df_name(topology_name: str) -> bool:
     return upper == "DF" or upper.startswith("DF-")
 
 
+def _is_clos_name(topology_name: str) -> bool:
+    upper = str(topology_name).strip().upper()
+    return upper == "CLOS" or upper.startswith("CLOS-")
+
+
 def _is_torus_name(topology_name: str) -> bool:
     return is_torus_topology_name(topology_name)
 
@@ -264,11 +269,13 @@ def _clos_spine_sort_key(node_id: str) -> tuple[int, int]:
 
 def _exchange_grid_positions_clos(g: nx.Graph) -> dict[str, tuple[float, float]]:
     positions: dict[str, tuple[float, float]] = {}
-    cols = 6
+    exchange_count = int(g.graph.get("clos_exchange_count", 18))
+    grid_shape = tuple(int(value) for value in g.graph.get("clos_exchange_grid_shape", (6, 3)))
+    cols = max(1, int(grid_shape[0])) if grid_shape else 6
     cell_x = 7.4
     cell_y = 3.9
 
-    for index in range(18):
+    for index in range(exchange_count):
         row = index // cols
         col = index % cols
         exchange_id = f"en{index}"
@@ -290,6 +297,49 @@ def _exchange_grid_positions_clos(g: nx.Graph) -> dict[str, tuple[float, float]]
             spine_origin_x + (uplink * spine_spacing_x),
             spine_origin_y + (plane * plane_spacing_y),
         )
+
+    return positions
+
+
+def _exchange_grid_positions_clos_4p_fullmesh(g: nx.Graph) -> dict[str, tuple[float, float]]:
+    positions: dict[str, tuple[float, float]] = {}
+    cols = 16
+    cell_x = 5.15
+    cell_y = 3.7
+    group_gap_x = 1.15
+
+    exchange_ids = sorted(
+        {
+            str(data.get("exchange_node_id"))
+            for _, data in g.nodes(data=True)
+            if data.get("exchange_node_id") is not None
+        },
+        key=lambda value: int(value.removeprefix("en")),
+    )
+
+    for index, exchange_id in enumerate(exchange_ids):
+        row = index // cols
+        col = index % cols
+        base_x = (col * cell_x) + ((col // 4) * group_gap_x)
+        base_y = -(row * cell_y) - 2.8
+        positions.update(_exchange_local_positions(base_x, base_y, exchange_id))
+
+    leaf_nodes = sorted(
+        [node_id for node_id, data in g.nodes(data=True) if data.get("node_role") == "clos_leaf"],
+        key=_clos_spine_sort_key,
+    )
+    if leaf_nodes:
+        total_width = ((cols - 1) * cell_x) + (((cols // 4) - 1) * group_gap_x)
+        leaf_origin_x = total_width * 0.22
+        leaf_spacing_x = total_width * 0.44
+        leaf_origin_y = 3.4
+        plane_spacing_y = 1.9
+        for node_id in leaf_nodes:
+            plane, uplink = _clos_spine_sort_key(node_id)
+            positions[node_id] = (
+                leaf_origin_x + (uplink * leaf_spacing_x),
+                leaf_origin_y + (plane * plane_spacing_y),
+            )
 
     return positions
 
@@ -400,8 +450,10 @@ def _explicit_positions(topology_name: str, g: nx.Graph) -> dict[Any, tuple[floa
         return _exchange_grid_positions_2d_torus(g)
     if _torus_family_name(topology_name) == "3D-Torus":
         return _exchange_grid_positions_3d_torus(g)
-    if topology_name == "Clos":
+    if _is_clos_name(topology_name) and topology_name != "Clos-4P-FullMesh":
         return _exchange_grid_positions_clos(g)
+    if topology_name == "Clos-4P-FullMesh":
+        return _exchange_grid_positions_clos_4p_fullmesh(g)
     if _is_df_name(topology_name):
         return _exchange_grid_positions_df(g)
     if _is_sparsemesh_name(topology_name):
@@ -432,6 +484,8 @@ def _node_color(node_data: dict[str, Any]) -> str:
     if role == "union":
         return _UNION_NODE_COLOR
     if role == "clos_spine":
+        return _SPINE_NODE_COLOR
+    if role == "clos_leaf":
         return _SPINE_NODE_COLOR
     return _DEFAULT_NODE_COLOR
 
@@ -554,6 +608,13 @@ def _edge_curve_factor(
         dst_local = int(g.nodes[v].get("server_local_union_index", 0))
         parity_sign = -1.0 if ((src_local + dst_local) % 2 == 0) else 1.0
         return 0.12 * parity_sign
+
+    if topology_name == "Clos-4P-FullMesh" and topology_role == "clos4p_local_fullmesh":
+        src_local = int(g.nodes[u].get("clos_local_group_slot", 0))
+        dst_local = int(g.nodes[v].get("clos_local_group_slot", 0))
+        gap = abs(src_local - dst_local)
+        parity_sign = -1.0 if ((src_local + dst_local) % 2 == 0) else 1.0
+        return parity_sign * min(0.30, 0.12 + (0.05 * gap))
 
     if _torus_family_name(topology_name) == "2D-Torus" and topology_role in {"2d_torus_x", "2d_torus_y"}:
         union_plane = int(g.nodes[u].get("local_index", 0))
@@ -795,8 +856,10 @@ def _layout_notes(topology_name: str) -> list[str]:
     base_note = "SSUs stay on the bottom row and Unions sit on the layer above inside each exchange node."
     if _torus_family_name(topology_name) == "3D-Torus":
         return [base_note, "Exchange nodes are grouped into paired z-layers, each rendered as one 4x4 plane block."]
-    if topology_name == "Clos":
+    if _is_clos_name(topology_name) and topology_name != "Clos-4P-FullMesh":
         return [base_note, "Clos spine layer sits above the exchange-node Union layer for structured two-level viewing."]
+    if topology_name == "Clos-4P-FullMesh":
+        return [base_note, "Two leaf switches per plane sit above the exchange-node Union layer; each plane also contains local 4P full-mesh Union groups."]
     if _is_df_name(topology_name):
         return [
             base_note,
@@ -1060,6 +1123,7 @@ def _hardware_legend_traces(g: nx.Graph) -> list[go.Scatter]:
         ("ssu", "SSU", _SSU_NODE_COLOR, 11),
         ("union", "Union", _UNION_NODE_COLOR, 14),
         ("clos_spine", "Clos Spine", _SPINE_NODE_COLOR, 14),
+        ("clos_leaf", "Leaf Switch", _SPINE_NODE_COLOR, 14),
     ]
     traces: list[go.Scatter] = []
     for role, label, color, size in legend_items:
@@ -1533,21 +1597,26 @@ def _join_display_names(names: list[str]) -> str:
 def _all_topology_page_order(topology_name: str) -> int:
     order = {
         "Clos": 0,
-        "2D-FullMesh": 1,
-        "2D-FullMesh-2x4": 2,
-        "2D-Torus": 3,
-        "2D-Torus-BestTwist": 4,
-        "3D-Torus": 5,
-        "3D-Torus-BestTwist": 6,
-        "3D-Torus-2x4x3": 7,
-        "3D-Torus-2x4x3-BestTwist": 8,
-        "3D-Torus-2x4x2": 9,
-        "3D-Torus-2x4x2-BestTwist": 10,
-        "3D-Torus-2x4x1": 11,
-        "3D-Torus-2x4x1-BestTwist": 12,
-        "DF": 13,
-        "SparseMesh-Local": 14,
-        "SparseMesh-Global": 15,
+        "Clos-64": 1,
+        "Clos-128": 2,
+        "Clos-192": 3,
+        "Clos-256": 4,
+        "Clos-4P-FullMesh": 5,
+        "2D-FullMesh": 6,
+        "2D-FullMesh-2x4": 7,
+        "2D-Torus": 8,
+        "2D-Torus-BestTwist": 9,
+        "3D-Torus": 10,
+        "3D-Torus-BestTwist": 11,
+        "3D-Torus-2x4x3": 12,
+        "3D-Torus-2x4x3-BestTwist": 13,
+        "3D-Torus-2x4x2": 14,
+        "3D-Torus-2x4x2-BestTwist": 15,
+        "3D-Torus-2x4x1": 16,
+        "3D-Torus-2x4x1-BestTwist": 17,
+        "DF": 18,
+        "SparseMesh-Local": 19,
+        "SparseMesh-Global": 20,
     }
     return int(order.get(str(topology_name), 10_000))
 
@@ -1587,6 +1656,11 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
         return int(item["topology"]["ssu_count"])
 
     clos = get_item("Clos")
+    clos_64 = get_item("Clos-64")
+    clos_128 = get_item("Clos-128")
+    clos_192 = get_item("Clos-192")
+    clos_256 = get_item("Clos-256")
+    clos_4p = get_item("Clos-4P-FullMesh")
     fullmesh = get_item("2D-FullMesh")
     fullmesh_small = get_item("2D-FullMesh-2x4")
     sparse_global = get_item("SparseMesh-Global")
@@ -1605,12 +1679,41 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
 
     cards: list[dict[str, str]] = []
 
-    if clos is not None or fullmesh is not None:
+    if (
+        clos is not None
+        or clos_64 is not None
+        or clos_128 is not None
+        or clos_192 is not None
+        or clos_256 is not None
+        or clos_4p is not None
+        or fullmesh is not None
+    ):
         first_parts: list[str] = []
         if clos is not None:
             first_parts.append(
                 f"{clos['display_name']} 的 A2A 每 SSU 吞吐最高，为 {a2a_tp(clos):.0f} Gbps；"
                 f"每 SSU 对分带宽达到 {bisection(clos):.0f} Gbps，链路利用率 CV 为 {a2a_cv(clos):.3f}。"
+            )
+        scaled_clos_items = [
+            item
+            for item in (clos_64, clos_128, clos_192, clos_256)
+            if item is not None
+        ]
+        if scaled_clos_items:
+            scaled_clos_notes = "、".join(
+                f"{item['display_name']} {a2a_tp(item):.0f} Gbps"
+                for item in scaled_clos_items
+            )
+            first_parts.append(
+                "新增的不同规模 Clos 版本里，"
+                + scaled_clos_notes
+                + f"；它们的每 SSU 对分带宽都维持在 {bisection(scaled_clos_items[0]):.0f} Gbps，说明在当前 4 x 400G/Union 配置下，扩大 Clos 规模不会稀释单 SSU 的理论切分能力。"
+            )
+        if clos_4p is not None:
+            first_parts.append(
+                f"{clos_4p['display_name']} 走的是“4P 本地 FullMesh + 双 Leaf 上联”结构，"
+                f"A2A 每 SSU 吞吐为 {a2a_tp(clos_4p):.0f} Gbps，"
+                f"每 SSU 对分带宽为 {bisection(clos_4p):.0f} Gbps。"
             )
         if fullmesh is not None:
             first_parts.append(
@@ -1625,7 +1728,7 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
         first_parts.append("这一档的共同特点是后端切分能力强、流量分布均匀，因此 A2A 表现最稳。")
         cards.append(
             {
-                "title": "第一档：Clos 与 2D-FullMesh",
+                "title": "第一档：Clos 系列与 2D-FullMesh",
                 "body": "".join(first_parts),
             }
         )

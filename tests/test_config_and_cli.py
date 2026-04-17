@@ -24,6 +24,11 @@ def test_analysis_config_defaults_match_ssu_design():
         "3D-Torus-2x4x1",
         "3D-Torus-2x4x1-BestTwist",
         "Clos",
+        "Clos-64",
+        "Clos-128",
+        "Clos-192",
+        "Clos-256",
+        "Clos-4P-FullMesh",
         "DF",
         "SparseMesh-Local",
         "SparseMesh-Global",
@@ -61,6 +66,18 @@ def test_parse_args_accepts_df_topology(monkeypatch):
     monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "DF"])
     args = parse_args()
     assert args.topologies == "DF"
+
+
+def test_parse_args_accepts_clos_4p_fullmesh_topology(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "Clos-4P-FullMesh"])
+    args = parse_args()
+    assert args.topologies == "Clos-4P-FullMesh"
+
+
+def test_parse_args_accepts_scaled_clos_topologies(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "Clos-64,Clos-256"])
+    args = parse_args()
+    assert args.topologies == "Clos-64,Clos-256"
 
 
 def test_parse_args_accepts_best_twist_torus_variants(monkeypatch):

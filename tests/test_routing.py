@@ -429,14 +429,44 @@ def test_compute_paths_accepts_legacy_aliases_for_direct_topologies():
     assert [path.nodes for path in full_paths] == [path.nodes for path in alias_full_paths]
 
 
-def test_ecmp_returns_equal_cost_paths_for_clos():
+@pytest.mark.parametrize("name", ["Clos", "Clos-64", "Clos-256"])
+def test_ecmp_returns_equal_cost_paths_for_clos_family(name: str):
     cfg = AnalysisConfig()
-    g = build_topology("Clos", cfg)
+    g = build_topology(name, cfg)
     paths = compute_paths(g, "en0:ssu0", "en1:ssu0", routing_mode="ECMP", cfg=cfg)
     assert len(paths) == cfg.clos_uplinks_per_exchange_node * 2
     assert len({path.hops for path in paths}) == 1
     assert len({round(path.weight, 8) for path in paths}) == 1
     assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
+
+
+def test_ecmp_returns_two_plane_direct_paths_inside_same_4p_group_for_clos_4p_fullmesh():
+    cfg = AnalysisConfig()
+    g = build_topology("Clos-4P-FullMesh", cfg)
+    paths = compute_paths(g, "en0:ssu0", "en1:ssu0", routing_mode="ECMP", cfg=cfg)
+
+    assert len(paths) == 2
+    assert {path.hops for path in paths} == {3}
+    assert {round(path.weight, 8) for path in paths} == {0.5}
+    assert {
+        tuple(_backend_roles_for_path(g, path.nodes))
+        for path in paths
+    } == {("clos4p_local_fullmesh",)}
+
+
+def test_ecmp_returns_four_leaf_split_paths_across_planes_for_clos_4p_fullmesh():
+    cfg = AnalysisConfig()
+    g = build_topology("Clos-4P-FullMesh", cfg)
+    paths = compute_paths(g, "en0:ssu0", "en4:ssu0", routing_mode="ECMP", cfg=cfg)
+
+    assert len(paths) == 4
+    assert {path.hops for path in paths} == {4}
+    assert {round(path.weight, 8) for path in paths} == {0.25}
+    assert abs(sum(path.weight for path in paths) - 1.0) < 1e-9
+    assert {
+        tuple(_backend_roles_for_path(g, path.nodes))
+        for path in paths
+    } == {("clos4p_leaf_uplink", "clos4p_leaf_uplink")}
 
 
 def test_compute_paths_rejects_invalid_routing_mode():

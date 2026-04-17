@@ -71,7 +71,7 @@ def parse_args() -> argparse.Namespace:
         "--topologies",
         type=_parse_topologies,
         default=",".join(base_cfg.topology_names),
-        help="Comma-separated topology names. Example: 2D-FullMesh,2D-Torus,2D-Torus-BestTwist,3D-Torus,3D-Torus-BestTwist,Clos,DF",
+        help="Comma-separated topology names. Example: 2D-FullMesh,2D-Torus,3D-Torus,Clos,Clos-64,Clos-256,Clos-4P-FullMesh,DF",
     )
     parser.add_argument(
         "--routing-mode",

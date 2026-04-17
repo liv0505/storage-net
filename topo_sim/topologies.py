@@ -15,6 +15,20 @@ _INTERNAL_BW_GBPS = 200.0
 _MIN_CLOS_UPLINKS_PER_PLANE = 1
 _MAX_CLOS_UPLINKS_PER_PLANE = 6
 _CLOS_EXCHANGE_NODE_COUNT = 18
+_CLOS_SCALED_EXCHANGE_COUNTS: dict[str, int] = {
+    "Clos-64": 8,
+    "Clos-128": 16,
+    "Clos-192": 24,
+    "Clos-256": 32,
+}
+_CLOS_4P_FULLMESH_GROUP_SIZE = 4
+_CLOS_4P_FULLMESH_GROUPS_PER_PLANE = 32
+_CLOS_4P_FULLMESH_PLANES = 2
+_CLOS_4P_FULLMESH_LEAFS_PER_PLANE = 2
+_CLOS_4P_FULLMESH_LEAF_UPLINK_BW_GBPS = 800.0
+_CLOS_4P_FULLMESH_EXCHANGE_NODE_COUNT = (
+    _CLOS_4P_FULLMESH_GROUP_SIZE * _CLOS_4P_FULLMESH_GROUPS_PER_PLANE
+)
 _MIN_DF_UNIONS_PER_SERVER = 2
 _MIN_DF_RING_UNIONS_PER_SERVER = 4
 _FULLMESH_SHAPES: dict[str, tuple[int, int]] = {
@@ -177,7 +191,7 @@ def _validate_clos_uplink_budget(cfg: AnalysisConfig) -> None:
         )
 
 
-def _validate_clos_spine_fanout(g: nx.Graph) -> None:
+def _validate_clos_spine_fanout(g: nx.Graph, expected_exchange_count: int) -> None:
     for node_id, node_data in g.nodes(data=True):
         if node_data.get("node_role") != "clos_spine":
             continue
@@ -187,10 +201,27 @@ def _validate_clos_spine_fanout(g: nx.Graph) -> None:
             for _, _, edge_data in g.edges(node_id, data=True)
             if edge_data.get("link_kind") == "backend_interconnect"
         )
-        if fanout != _CLOS_EXCHANGE_NODE_COUNT:
+        if fanout != expected_exchange_count:
             raise ValueError(
                 "Clos spine fanout must be exactly "
-                f"{_CLOS_EXCHANGE_NODE_COUNT}, got {fanout} for {node_id}"
+                f"{expected_exchange_count}, got {fanout} for {node_id}"
+            )
+
+
+def _validate_clos_leaf_fanout(g: nx.Graph) -> None:
+    for node_id, node_data in g.nodes(data=True):
+        if node_data.get("node_role") != "clos_leaf":
+            continue
+
+        fanout = sum(
+            1
+            for _, _, edge_data in g.edges(node_id, data=True)
+            if edge_data.get("link_kind") == "backend_interconnect"
+        )
+        if fanout != _CLOS_4P_FULLMESH_EXCHANGE_NODE_COUNT:
+            raise ValueError(
+                "Clos 4P leaf fanout must be exactly "
+                f"{_CLOS_4P_FULLMESH_EXCHANGE_NODE_COUNT}, got {fanout} for {node_id}"
             )
 
 
@@ -276,6 +307,25 @@ def _add_backend_link(
         topology_role=topology_role,
         parallel_links=parallel_links,
     )
+
+
+def _clos_exchange_grid_shape(exchange_count: int) -> tuple[int, int]:
+    predefined = {
+        8: (4, 2),
+        16: (4, 4),
+        18: (6, 3),
+        24: (6, 4),
+        32: (8, 4),
+    }
+    if exchange_count in predefined:
+        return predefined[exchange_count]
+
+    cols = max(1, math.ceil(math.sqrt(exchange_count)))
+    rows = max(1, math.ceil(exchange_count / cols))
+    while cols > rows + 2 and exchange_count % (cols - 1) == 0:
+        cols -= 1
+        rows = max(1, math.ceil(exchange_count / cols))
+    return cols, rows
 
 
 def _set_exchange_grid_coord(
@@ -1091,10 +1141,55 @@ def build_3d_torus_2x4x1_best_twist(cfg: AnalysisConfig) -> nx.Graph:
 
 
 def build_clos(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_clos_variant(
+        cfg,
+        topology_key="Clos",
+        exchange_count=_CLOS_EXCHANGE_NODE_COUNT,
+    )
+
+
+def build_clos_64(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_clos_variant(
+        cfg,
+        topology_key="Clos-64",
+        exchange_count=int(_CLOS_SCALED_EXCHANGE_COUNTS["Clos-64"]),
+    )
+
+
+def build_clos_128(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_clos_variant(
+        cfg,
+        topology_key="Clos-128",
+        exchange_count=int(_CLOS_SCALED_EXCHANGE_COUNTS["Clos-128"]),
+    )
+
+
+def build_clos_192(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_clos_variant(
+        cfg,
+        topology_key="Clos-192",
+        exchange_count=int(_CLOS_SCALED_EXCHANGE_COUNTS["Clos-192"]),
+    )
+
+
+def build_clos_256(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_clos_variant(
+        cfg,
+        topology_key="Clos-256",
+        exchange_count=int(_CLOS_SCALED_EXCHANGE_COUNTS["Clos-256"]),
+    )
+
+
+def _build_clos_variant(
+    cfg: AnalysisConfig,
+    *,
+    topology_key: str,
+    exchange_count: int,
+) -> nx.Graph:
     _validate_clos_uplink_budget(cfg)
 
     g = nx.Graph()
-    exchange_nodes = [_add_exchange_node(g, f"en{idx}", cfg) for idx in range(_CLOS_EXCHANGE_NODE_COUNT)]
+    exchange_nodes = [_add_exchange_node(g, f"en{idx}", cfg) for idx in range(exchange_count)]
 
     plane_spine_ids: dict[int, list[str]] = {}
     for plane_index in range(2):
@@ -1121,7 +1216,92 @@ def build_clos(cfg: AnalysisConfig) -> nx.Graph:
                     topology_role="clos_uplink",
                 )
 
-    _validate_clos_spine_fanout(g)
+    grid_cols, grid_rows = _clos_exchange_grid_shape(exchange_count)
+
+    _validate_clos_spine_fanout(g, exchange_count)
+    g.graph["topology_family"] = "CLOS"
+    g.graph["clos_variant"] = topology_key
+    g.graph["clos_plane_count"] = 2
+    g.graph["clos_exchange_count"] = exchange_count
+    g.graph["clos_exchange_grid_shape"] = (grid_cols, grid_rows)
+    g.graph["clos_switch_count_per_plane"] = int(cfg.clos_uplinks_per_exchange_node)
+    g.graph["clos_total_switch_count"] = int(cfg.clos_uplinks_per_exchange_node) * 2
+    g.graph["clos_switch_role"] = "clos_spine"
+    g.graph["clos_local_group_size"] = 1
+    g.graph["clos_local_group_count_per_plane"] = exchange_count
+    g.graph["clos_uplink_bandwidth_gbps"] = _BACKEND_BW_GBPS
+    g.graph["exchange_projection_fast_path"] = True
+    return _annotate_graph(g, cfg)
+
+
+def build_clos_4p_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
+    g = nx.Graph()
+    exchange_nodes = [
+        _add_exchange_node(g, f"en{idx}", cfg)
+        for idx in range(_CLOS_4P_FULLMESH_EXCHANGE_NODE_COUNT)
+    ]
+
+    plane_leaf_ids: dict[int, list[str]] = {}
+    for plane_index in range(_CLOS_4P_FULLMESH_PLANES):
+        leaf_ids = [
+            f"clos_leaf_plane{plane_index}_uplink{leaf_index}"
+            for leaf_index in range(_CLOS_4P_FULLMESH_LEAFS_PER_PLANE)
+        ]
+        plane_leaf_ids[plane_index] = leaf_ids
+        for leaf_id in leaf_ids:
+            g.add_node(
+                leaf_id,
+                node_type="switch",
+                node_role="clos_leaf",
+                union_plane=plane_index,
+            )
+
+    for exchange_index, exchange in enumerate(exchange_nodes):
+        local_group_id = exchange_index // _CLOS_4P_FULLMESH_GROUP_SIZE
+        local_group_slot = exchange_index % _CLOS_4P_FULLMESH_GROUP_SIZE
+        for plane_index, union_id in enumerate(exchange["unions"]):
+            g.nodes[union_id].update(
+                clos_plane_index=plane_index,
+                clos_local_group_id=local_group_id,
+                clos_local_group_slot=local_group_slot,
+            )
+
+    for plane_index in range(_CLOS_4P_FULLMESH_PLANES):
+        for group_index in range(_CLOS_4P_FULLMESH_GROUPS_PER_PLANE):
+            group_start = group_index * _CLOS_4P_FULLMESH_GROUP_SIZE
+            union_ids = [
+                exchange_nodes[group_start + offset]["unions"][plane_index]
+                for offset in range(_CLOS_4P_FULLMESH_GROUP_SIZE)
+            ]
+            _add_df_server_fullmesh_links(g, union_ids)
+            for src_index, src_union_id in enumerate(union_ids):
+                for dst_union_id in union_ids[src_index + 1 :]:
+                    g.edges[src_union_id, dst_union_id]["topology_role"] = "clos4p_local_fullmesh"
+
+        for exchange in exchange_nodes:
+            union_id = exchange["unions"][plane_index]
+            for leaf_id in plane_leaf_ids[plane_index]:
+                _add_backend_link(
+                    g,
+                    union_id,
+                    leaf_id,
+                    topology_role="clos4p_leaf_uplink",
+                    bandwidth_gbps=_CLOS_4P_FULLMESH_LEAF_UPLINK_BW_GBPS,
+                )
+
+    _validate_clos_leaf_fanout(g)
+    g.graph["topology_family"] = "CLOS"
+    g.graph["clos_variant"] = "Clos-4P-FullMesh"
+    g.graph["clos_plane_count"] = _CLOS_4P_FULLMESH_PLANES
+    g.graph["clos_exchange_count"] = _CLOS_4P_FULLMESH_EXCHANGE_NODE_COUNT
+    g.graph["clos_switch_count_per_plane"] = _CLOS_4P_FULLMESH_LEAFS_PER_PLANE
+    g.graph["clos_total_switch_count"] = _CLOS_4P_FULLMESH_PLANES * _CLOS_4P_FULLMESH_LEAFS_PER_PLANE
+    g.graph["clos_switch_role"] = "clos_leaf"
+    g.graph["clos_local_group_size"] = _CLOS_4P_FULLMESH_GROUP_SIZE
+    g.graph["clos_local_group_count_per_plane"] = _CLOS_4P_FULLMESH_GROUPS_PER_PLANE
+    g.graph["clos_local_bandwidth_gbps"] = _BACKEND_BW_GBPS
+    g.graph["clos_uplink_bandwidth_gbps"] = _CLOS_4P_FULLMESH_LEAF_UPLINK_BW_GBPS
+    g.graph["exchange_projection_fast_path"] = True
     return _annotate_graph(g, cfg)
 
 
@@ -1225,6 +1405,11 @@ BUILDERS: dict[str, TopologyBuilder] = {
     "3D-Torus-2x4x1": build_3d_torus_2x4x1,
     "3D-Torus-2x4x1-BestTwist": build_3d_torus_2x4x1_best_twist,
     "Clos": build_clos,
+    "Clos-64": build_clos_64,
+    "Clos-128": build_clos_128,
+    "Clos-192": build_clos_192,
+    "Clos-256": build_clos_256,
+    "Clos-4P-FullMesh": build_clos_4p_fullmesh,
     "DF": build_df,
     "SparseMesh-Local": build_sparsemesh_local,
     "SparseMesh-Global": build_sparsemesh_global,

@@ -62,3 +62,20 @@ def test_accelerated_shortest_path_projection_still_emits_all_required_metrics(m
         "max_link_utilization",
         "link_utilization_cv",
     }
+
+
+def test_clos_exchange_projection_matches_explicit_ecmp_path_splitting(monkeypatch):
+    cfg = AnalysisConfig()
+    g = build_topology("Clos", cfg)
+    demands = [
+        FlowDemand(src="en0:ssu0", dst="en1:ssu0", bits=_message_bits(cfg)),
+        FlowDemand(src="en2:ssu3", dst="en5:ssu6", bits=_message_bits(cfg)),
+    ]
+
+    monkeypatch.setattr(metrics_module, "_should_use_direct_projection_fast_path", lambda graph, mode: False)
+    explicit = evaluate_workload(g, demands, routing_mode="ECMP", cfg=cfg)
+
+    monkeypatch.setattr(metrics_module, "_should_use_direct_projection_fast_path", lambda graph, mode: True)
+    accelerated = evaluate_workload(g, demands, routing_mode="ECMP", cfg=cfg)
+
+    assert accelerated == pytest.approx(explicit)

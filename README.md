@@ -1,10 +1,10 @@
 ﻿# SSU-Centric Topology Modeling & Simulation Toolkit
 
-一个面向数据交换节点组网分析的 Python 项目。当前版本以 `SSU -> SSU` 通信为中心，基于统一的 `8 SSU + 2 Union` 数据交换节点模型，对 `2D-FullMesh`、`2D-Torus`、`3D-Torus`、`Clos` 四类拓扑做结构与通信性能评估，并输出 CSV / HTML / PDF 报告。
+一个面向数据交换节点组网分析的 Python 项目。当前版本以 `SSU -> SSU` 通信为中心，基于统一的 `8 SSU + 2 Union` 数据交换节点模型，对多类拓扑做结构与通信性能评估，并输出 CSV / HTML 报告。
 
 ## 当前建模范围
 
-- 支持拓扑：`2D-FullMesh`、`2D-Torus`、`3D-Torus`、`Clos`
+- 支持拓扑：`2D-FullMesh`、`2D-Torus`、`3D-Torus`、`Clos`、`Clos-64/128/192/256`、`Clos-4P-FullMesh`、`Dragon-Fly`、`SparseMesh`
 - 基本单元：每个数据交换节点包含 `8` 个 SSU 和 `2` 个 Union
 - 节点内互联：每个 SSU 通过 `2 x 200 Gbps` UB 端口分别连接到两个 Union
 - 后端组网：Union 间后端链路默认按 `400 Gbps` 建模
@@ -75,8 +75,6 @@ python main.py --topologies 2D-FullMesh,Clos --routing-mode FULL_PATH --sparse-a
   - 包含 routing / workload 参数，以及本次实际分析的 `selected_topologies`
 - `topology_dashboard.html`
   - 展示硬件假设、拓扑配置、路由说明、结构指标、A2A 与 Sparse 1-to-N 指标
-- `topology_report.pdf`
-  - 包含项目摘要、硬件与拓扑配置、路由与 workload 配置、量化指标、关键观察
 
 ## 配置项
 
@@ -94,6 +92,5 @@ python main.py --topologies 2D-FullMesh,Clos --routing-mode FULL_PATH --sparse-a
 ## 开发说明
 
 - CSV 是机器读结果的主出口
-- HTML / PDF 与 CSV 使用同一批 SSU-centric 指标来源，避免旧指标兼容层造成语义漂移
+- HTML 与 CSV 使用同一批 SSU-centric 指标来源，避免旧指标兼容层造成语义漂移
 - 当前实现优先保证结构正确性和可解释性，后续可以继续扩展更高保真链路模型、集合通信算法和离散事件仿真
-

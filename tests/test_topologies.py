@@ -28,6 +28,11 @@ def test_available_topologies_only_exposes_new_names():
         "3D-Torus-2x4x1",
         "3D-Torus-2x4x1-BestTwist",
         "Clos",
+        "Clos-64",
+        "Clos-128",
+        "Clos-192",
+        "Clos-256",
+        "Clos-4P-FullMesh",
         "DF",
         "SparseMesh-Local",
         "SparseMesh-Global",
@@ -176,9 +181,22 @@ def test_3d_torus_2x4x1_gives_each_union_four_backend_ports():
     assert set(union_backend_degree.values()) == {4}
 
 
-def test_clos_uses_18_exchange_nodes_with_plane_local_uplinks():
+@pytest.mark.parametrize(
+    ("name", "expected_exchange_count"),
+    [
+        ("Clos", 18),
+        ("Clos-64", 8),
+        ("Clos-128", 16),
+        ("Clos-192", 24),
+        ("Clos-256", 32),
+    ],
+)
+def test_clos_family_uses_expected_exchange_nodes_with_plane_local_uplinks(
+    name: str,
+    expected_exchange_count: int,
+):
     cfg = AnalysisConfig()
-    g = build_topology("Clos", cfg)
+    g = build_topology(name, cfg)
     backend = [
         (u, v, data)
         for u, v, data in g.edges(data=True)
@@ -190,7 +208,7 @@ def test_clos_uses_18_exchange_nodes_with_plane_local_uplinks():
             exchange_node = g.nodes[node].get("exchange_node_id")
             if exchange_node is not None:
                 uplinks_by_exchange[exchange_node] = uplinks_by_exchange.get(exchange_node, 0) + 1
-    assert len(uplinks_by_exchange) == 18
+    assert len(uplinks_by_exchange) == expected_exchange_count
     assert all(count == cfg.clos_uplinks_per_exchange_node * 2 for count in uplinks_by_exchange.values())
 
     union_backend_degree = {
@@ -206,9 +224,22 @@ def test_clos_uses_18_exchange_nodes_with_plane_local_uplinks():
     assert set(union_backend_degree.values()) == {cfg.clos_uplinks_per_exchange_node}
 
 
-def test_clos_spines_have_expected_count_and_exact_fanout_in_default_case():
+@pytest.mark.parametrize(
+    ("name", "expected_exchange_count"),
+    [
+        ("Clos", 18),
+        ("Clos-64", 8),
+        ("Clos-128", 16),
+        ("Clos-192", 24),
+        ("Clos-256", 32),
+    ],
+)
+def test_clos_family_spines_have_expected_count_and_exact_fanout(
+    name: str,
+    expected_exchange_count: int,
+):
     cfg = AnalysisConfig()
-    g = build_topology("Clos", cfg)
+    g = build_topology(name, cfg)
     spine_nodes = [n for n, d in g.nodes(data=True) if d.get("node_role") == "clos_spine"]
     assert len(spine_nodes) == cfg.clos_uplinks_per_exchange_node * 2
 
@@ -220,7 +251,65 @@ def test_clos_spines_have_expected_count_and_exact_fanout_in_default_case():
         )
         for node in spine_nodes
     ]
-    assert all(count == 18 for count in downlinks)
+    assert all(count == expected_exchange_count for count in downlinks)
+
+
+def test_clos_4p_fullmesh_uses_expected_counts_and_leaf_uplinks():
+    g = build_topology("Clos-4P-FullMesh", AnalysisConfig())
+
+    exchange_ids = {
+        data.get("exchange_node_id")
+        for _, data in g.nodes(data=True)
+        if data.get("exchange_node_id") is not None
+    }
+    assert len(exchange_ids) == 128
+
+    leaf_nodes = [n for n, d in g.nodes(data=True) if d.get("node_role") == "clos_leaf"]
+    assert len(leaf_nodes) == 4
+
+    union_backend_degree = {
+        node_id: sum(
+            1
+            for _, _, data in g.edges(node_id, data=True)
+            if data.get("link_kind") == "backend_interconnect"
+        )
+        for node_id, node_data in g.nodes(data=True)
+        if node_data.get("node_role") == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {5}
+
+    leaf_fanout = [
+        sum(
+            1
+            for _, _, data in g.edges(node_id, data=True)
+            if data.get("link_kind") == "backend_interconnect"
+        )
+        for node_id in leaf_nodes
+    ]
+    assert all(count == 128 for count in leaf_fanout)
+
+
+def test_clos_4p_fullmesh_groups_unions_into_plane_local_4p_fullmesh_blocks():
+    g = build_topology("Clos-4P-FullMesh", AnalysisConfig())
+
+    backend_roles = [
+        data.get("topology_role")
+        for _, _, data in g.edges(data=True)
+        if data.get("link_kind") == "backend_interconnect"
+    ]
+    assert set(backend_roles) == {"clos4p_local_fullmesh", "clos4p_leaf_uplink"}
+
+    plane0_group0 = [f"en{idx}:union0" for idx in range(4)]
+    plane1_group0 = [f"en{idx}:union1" for idx in range(4)]
+    for group in (plane0_group0, plane1_group0):
+        for src_index, src_union in enumerate(group):
+            for dst_union in group[src_index + 1 :]:
+                assert g.has_edge(src_union, dst_union)
+                assert g.edges[src_union, dst_union]["topology_role"] == "clos4p_local_fullmesh"
+
+    assert not g.has_edge("en0:union0", "en0:union1")
+    assert not g.has_edge("clos_leaf_plane0_uplink0", "clos_leaf_plane0_uplink1")
 
 
 def test_clos_rejects_more_than_six_uplinks_per_exchange_node():
@@ -503,6 +592,11 @@ def test_df_variants_share_ssus_across_two_backend_plane_components(
         ("3D-Torus-2x4x1", 64, 16, 128, 32),
         ("3D-Torus-2x4x1-BestTwist", 64, 16, 128, 32),
         ("Clos", 144, 36, 288, 144),
+        ("Clos-64", 64, 16, 128, 64),
+        ("Clos-128", 128, 32, 256, 128),
+        ("Clos-192", 192, 48, 384, 192),
+        ("Clos-256", 256, 64, 512, 256),
+        ("Clos-4P-FullMesh", 1024, 256, 2048, 896),
         ("DF", 416, 104, 832, 312),
         ("DF-Shuffled", 416, 104, 832, 312),
         ("DF-ScaleUp", 544, 136, 1088, 408),

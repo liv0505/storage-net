@@ -132,7 +132,18 @@ def test_pipeline_writes_routing_and_workload_config(output_dir: Path):
     assert payload["selected_topologies"] == ["Clos"]
 
 
-def test_dashboard_and_report_use_new_labels(output_dir: Path):
+def test_pipeline_removes_stale_pdf_output_when_regenerating_dashboard(output_dir: Path):
+    stale_pdf = output_dir / "topology_report.pdf"
+    stale_pdf.write_bytes(b"old pdf")
+
+    cfg = AnalysisConfig(output_dir=output_dir)
+    paths = run_full_analysis(cfg, ["2D-FullMesh"])
+
+    assert "pdf" not in paths
+    assert not stale_pdf.exists()
+
+
+def test_dashboard_outputs_use_new_labels_without_pdf(output_dir: Path):
     cfg = AnalysisConfig(output_dir=output_dir, routing_mode="PORT_BALANCED")
     paths = run_full_analysis(cfg, ["2D-Torus"])
 
@@ -167,13 +178,8 @@ def test_dashboard_and_report_use_new_labels(output_dir: Path):
     assert "PORT_BALANCED" not in html
     assert "A2Av Efficiency" not in html
 
-    assert paths["pdf"].exists()
-    assert paths["pdf"].stat().st_size > 0
-    pdf_text = paths["pdf"].read_bytes().decode("latin1", errors="ignore")
-    assert "FULL_PATH" in pdf_text
-    assert "Sparse M-to-N" in pdf_text
-    assert "PORT_BALANCED" not in pdf_text
-    assert "same-exchange SSU traffic stays inside the exchange node via Union switching" in pdf_text
+    assert "pdf" not in paths
+    assert not (output_dir / "topology_report.pdf").exists()
 
 
 def test_pipeline_renders_sparsemesh_dashboard_sections(output_dir: Path):
@@ -278,13 +284,6 @@ def test_direct_topology_outputs_compact_routing_comparison_sections(output_dir:
     assert "Traffic Models" in html
     assert "Routing Modes" in html
 
-    pdf_text = paths["pdf"].read_bytes().decode("latin1", errors="ignore")
-    assert "A2A Routing Comparison" in pdf_text
-    assert "Sparse M-to-N Routing Comparison" in pdf_text
-    assert "Default Route Throughput" in pdf_text
-    assert "DOR Throughput" in pdf_text
-
-
 def test_clos_outputs_only_ecmp_without_direct_routing_comparison_sections(output_dir: Path):
     cfg = AnalysisConfig(output_dir=output_dir, routing_mode="ECMP")
     paths = run_full_analysis(cfg, ["Clos"])
@@ -295,12 +294,6 @@ def test_clos_outputs_only_ecmp_without_direct_routing_comparison_sections(outpu
     assert "Workload Setup" in html
     assert "Routing Modes" in html
     assert "ECMP" in html
-
-    pdf_text = paths["pdf"].read_bytes().decode("latin1", errors="ignore")
-    assert "A2A Routing Comparison" not in pdf_text
-    assert "Sparse M-to-N Routing Comparison" not in pdf_text
-    assert "ECMP Throughput" in pdf_text
-
 
 def test_df_outputs_single_mode_summary_without_direct_routing_comparison_sections(output_dir: Path):
     cfg = AnalysisConfig(output_dir=output_dir, routing_mode="FULL_PATH")

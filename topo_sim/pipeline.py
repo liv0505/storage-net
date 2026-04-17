@@ -11,7 +11,6 @@ import networkx as nx
 from .config import AnalysisConfig
 from .labels import display_workload_name
 from .metrics import compute_structural_metrics, evaluate_workload, evaluate_workload_with_details
-from .report import build_pdf_report
 from .routing import compute_paths, normalize_routing_mode
 from .topologies import (
     available_topologies,
@@ -74,6 +73,11 @@ _SPARSEMESH_DISPLAY_VARIANTS = {
 def _is_df_name(name: str) -> bool:
     upper = str(name).strip().upper()
     return upper == "DF" or upper.startswith("DF-")
+
+
+def _is_clos_name(name: str) -> bool:
+    upper = str(name).strip().upper()
+    return upper == "CLOS" or upper.startswith("CLOS-")
 
 
 def _is_torus_name(name: str) -> bool:
@@ -149,7 +153,7 @@ def _workload_group(prefix: str, machine_metrics: dict[str, float]) -> dict[str,
 
 
 def _analysis_mode_for_topology(name: str, cfg: AnalysisConfig) -> str:
-    if name == "Clos":
+    if _is_clos_name(name):
         return "ECMP"
     if _is_df_name(name):
         return "SHORTEST_PATH"
@@ -359,6 +363,20 @@ def _topology_scale(name: str, g: nx.Graph) -> str:
             f"{exchange_count} shared exchange groups | {plane_count} SparseMesh planes | "
             f"{exchange_count} Union/plane | {ssu_per_plane} SSU/plane | s={sparsity}, N={stride_count} | {offset_label}"
         )
+    if _is_clos_name(name):
+        exchange_count = int(g.graph.get("clos_exchange_count", 0))
+        plane_count = int(g.graph.get("clos_plane_count", 2))
+        switch_count = int(g.graph.get("clos_switch_count_per_plane", 0))
+        local_group_size = int(g.graph.get("clos_local_group_size", 1))
+        local_group_count = int(g.graph.get("clos_local_group_count_per_plane", exchange_count))
+        switch_role = str(g.graph.get("clos_switch_role", "clos_spine"))
+        switch_label = "leaf switches" if switch_role == "clos_leaf" else "spines"
+        if local_group_size > 1:
+            return (
+                f"{exchange_count} shared exchange groups | {plane_count} planes | "
+                f"{local_group_count} local {local_group_size}-Union groups/plane | {switch_count} {switch_label}/plane"
+            )
+        return f"{exchange_count} exchange nodes | {plane_count} planes | {switch_count} {switch_label}/plane"
     return "18 exchange nodes"
 
 
@@ -449,6 +467,15 @@ def _topology_pattern(name: str, g: nx.Graph, cfg: AnalysisConfig) -> str:
             f"The two Union chips inside each exchange node belong to two independent sparsemesh planes with no Union-to-Union local bridge. "
             f"This variant is biased toward {style} connectivity while preserving ring diameter 2."
         )
+    if name == "Clos-4P-FullMesh":
+        local_group_size = int(g.graph.get("clos_local_group_size", 4))
+        local_group_count = int(g.graph.get("clos_local_group_count_per_plane", 0))
+        uplink_bandwidth = float(g.graph.get("clos_uplink_bandwidth_gbps", 800.0))
+        return (
+            f"Each Union first joins a {local_group_size}P local full-mesh with {local_group_size - 1} x 400 Gbps links, "
+            f"then adds 2 x {uplink_bandwidth:.0f} Gbps uplinks to two different leaf switches in the same plane. "
+            f"Each plane contains {local_group_count} such local groups and two leaf switches, with no leaf-to-leaf link."
+        )
     return (
         "Each exchange node keeps two independent Union planes; each Union uplinks via "
         f"{cfg.clos_uplinks_per_exchange_node} x 400 Gbps into its own Clos spine pool, "
@@ -481,7 +508,9 @@ def _topology_configuration(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict
         backend_ports_per_union = 6
     else:
         backend_ports_per_union = (
-            cfg.clos_uplinks_per_exchange_node if name == "Clos" else _backend_ports_per_union(g)
+            cfg.clos_uplinks_per_exchange_node
+            if _is_clos_name(name) and name != "Clos-4P-FullMesh"
+            else _backend_ports_per_union(g)
         )
 
     topology_cfg = {
@@ -494,9 +523,15 @@ def _topology_configuration(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict
         "backend_ports_per_union": backend_ports_per_union,
         "backend_pattern": _topology_pattern(name, g, cfg),
     }
-    if name == "Clos":
+    if _is_clos_name(name) and name != "Clos-4P-FullMesh":
         topology_cfg["clos_uplinks_per_union_plane"] = cfg.clos_uplinks_per_exchange_node
         topology_cfg["clos_total_uplinks_per_exchange_node"] = cfg.clos_uplinks_per_exchange_node * 2
+    if name == "Clos-4P-FullMesh":
+        topology_cfg["clos_plane_count"] = int(g.graph.get("clos_plane_count", 2))
+        topology_cfg["clos_local_group_size"] = int(g.graph.get("clos_local_group_size", 4))
+        topology_cfg["clos_local_group_count_per_plane"] = int(g.graph.get("clos_local_group_count_per_plane", 0))
+        topology_cfg["clos_switch_count_per_plane"] = int(g.graph.get("clos_switch_count_per_plane", 0))
+        topology_cfg["clos_uplink_bandwidth_gbps"] = float(g.graph.get("clos_uplink_bandwidth_gbps", 0.0))
     if _is_df_name(name):
         topology_cfg["server_count"] = int(g.graph.get("df_total_server_count", 0))
         topology_cfg["server_count_per_plane"] = int(g.graph.get("df_server_count", 0))
@@ -610,10 +645,18 @@ def _routing_configuration(name: str, cfg: AnalysisConfig) -> dict[str, Any]:
             f"non-shortest fallback is limited to {cfg.port_balanced_max_detour_hops} additional hop(s) beyond shortest-path distance when fallback is required"
         )
     elif mode == "ECMP":
-        notes.append("ECMP splits Clos traffic across equal-cost shortest paths through the upper Union stage")
-        notes.append(
-            f"each exchange contributes {cfg.clos_uplinks_per_exchange_node} x 400 Gbps from union0 and {cfg.clos_uplinks_per_exchange_node} x 400 Gbps from union1 into separate Clos spine pools"
-        )
+        if name == "Clos-4P-FullMesh":
+            notes.append(
+                "ECMP splits inter-group traffic across equal-cost shortest paths through the two leaf switches in each plane"
+            )
+            notes.append(
+                "if source and destination Unions already share the same local 4P full-mesh group, routing takes that shorter direct local link instead of going up to the leaf layer"
+            )
+        else:
+            notes.append("ECMP splits Clos traffic across equal-cost shortest paths through the upper Union stage")
+            notes.append(
+                f"each exchange contributes {cfg.clos_uplinks_per_exchange_node} x 400 Gbps from union0 and {cfg.clos_uplinks_per_exchange_node} x 400 Gbps from union1 into separate Clos spine pools"
+            )
 
     return {
         "mode": mode,
@@ -786,6 +829,8 @@ def _routing_mode_description(mode: str, topology_name: str, cfg: AnalysisConfig
             return "Uses every backend egress in each sparsemesh plane, then picks the least-hop continuation per egress."
         return f"Uses every backend egress; prefers shortest paths and allows up to {cfg.port_balanced_max_detour_hops} extra hop(s) if needed."
     if mode == "ECMP":
+        if topology_name == "Clos-4P-FullMesh":
+            return "Splits traffic across equal-cost leaf-switch paths after preferring any shorter local 4P full-mesh hop."
         return "Splits Clos traffic across equal-cost spine paths."
     return "Topology-specific routing behavior."
 
@@ -801,7 +846,7 @@ def _routing_mode_description_payload(name: str, cfg: AnalysisConfig) -> list[di
 
 
 def _comparison_modes_for_topology(name: str) -> list[str]:
-    if name == "Clos":
+    if _is_clos_name(name):
         return ["ECMP"]
     if _is_df_name(name):
         return ["SHORTEST_PATH"]
@@ -813,7 +858,7 @@ def _comparison_modes_for_topology(name: str) -> list[str]:
 
 
 def _default_highlight_mode(name: str) -> str:
-    if name == "Clos":
+    if _is_clos_name(name):
         return "ECMP"
     if _is_df_name(name):
         return "SHORTEST_PATH"
@@ -829,7 +874,7 @@ def _comparison_metric_subset(metrics: dict[str, float]) -> dict[str, float]:
 
 
 def _routing_comparison_payload(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict[str, Any] | None:
-    if name == "Clos" or _is_df_name(name):
+    if _is_clos_name(name) or _is_df_name(name):
         return None
 
     demands = _workload_demands(g, cfg)
@@ -1026,7 +1071,9 @@ def run_full_analysis(cfg: AnalysisConfig, topologies: list[str] | None = None) 
         writer.writerows(link_distribution_rows)
 
     html_path = render_html_dashboard(render_results, output_dir / "topology_dashboard.html")
-    pdf_path = build_pdf_report(render_results, output_dir / "topology_report.pdf")
+    legacy_pdf_path = output_dir / "topology_report.pdf"
+    if legacy_pdf_path.exists():
+        legacy_pdf_path.unlink()
 
     config_path = output_dir / "run_config.json"
     config_dict = asdict(cfg)
@@ -1039,6 +1086,5 @@ def run_full_analysis(cfg: AnalysisConfig, topologies: list[str] | None = None) 
         "hop_volume_csv": hop_volume_csv_path,
         "link_volume_csv": link_volume_csv_path,
         "html": html_path,
-        "pdf": pdf_path,
         "config": config_path,
     }

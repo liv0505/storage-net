@@ -75,6 +75,34 @@ def test_3d_torus_2x4x1_bisection_matches_surface_cut_formula():
     assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(100.0)
 
 
+def test_clos_4p_fullmesh_bisection_matches_dual_leaf_cut_formula():
+    g = build_topology("Clos-4P-FullMesh", AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(204800.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(400.0)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_bisection_gbps"),
+    [
+        ("Clos-64", 12800.0),
+        ("Clos-128", 25600.0),
+        ("Clos-192", 38400.0),
+        ("Clos-256", 51200.0),
+    ],
+)
+def test_scaled_clos_bisection_scales_with_ssu_count_and_keeps_400g_per_ssu(
+    name: str,
+    expected_bisection_gbps: float,
+):
+    g = build_topology(name, AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(expected_bisection_gbps)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(400.0)
+
+
 def test_bisection_bandwidth_ignores_internal_ssu_uplinks_when_backend_is_removed():
     g = build_topology("2D-Torus", AnalysisConfig())
     for u, v, data in list(g.edges(data=True)):
@@ -97,6 +125,20 @@ def test_a2a_metrics_return_throughput_completion_and_percentiles():
     assert result["completion_time_p95_s"] >= 0
     assert result["completion_time_p95_s"] >= result["completion_time_p50_s"]
     assert result["per_ssu_throughput_gbps"] > 0
+    assert result["max_link_utilization"] > 0
+    assert result["link_utilization_cv"] >= 0
+
+
+def test_clos_4p_fullmesh_metrics_return_positive_values_for_small_ecmp_workload():
+    cfg = AnalysisConfig()
+    g = build_topology("Clos-4P-FullMesh", cfg)
+    demands = [FlowDemand(src="en0:ssu0", dst="en4:ssu0", bits=_message_bits(cfg))]
+
+    result = evaluate_workload(g, demands, routing_mode="ECMP", cfg=cfg)
+
+    assert result["completion_time_s"] > 0
+    assert result["per_ssu_throughput_gbps"] > 0
+    assert result["average_hops"] == pytest.approx(4.0)
     assert result["max_link_utilization"] > 0
     assert result["link_utilization_cv"] >= 0
 
