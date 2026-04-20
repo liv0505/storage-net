@@ -79,8 +79,8 @@ def test_clos_4p_fullmesh_bisection_matches_dual_leaf_cut_formula():
     g = build_topology("Clos-4P-FullMesh", AnalysisConfig())
     metrics = compute_structural_metrics(g)
 
-    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(204800.0)
-    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(400.0)
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(102400.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(200.0)
 
 
 @pytest.mark.parametrize(

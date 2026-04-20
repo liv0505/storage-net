@@ -470,7 +470,7 @@ def _topology_pattern(name: str, g: nx.Graph, cfg: AnalysisConfig) -> str:
     if name == "Clos-4P-FullMesh":
         local_group_size = int(g.graph.get("clos_local_group_size", 4))
         local_group_count = int(g.graph.get("clos_local_group_count_per_plane", 0))
-        uplink_bandwidth = float(g.graph.get("clos_uplink_bandwidth_gbps", 800.0))
+        uplink_bandwidth = float(g.graph.get("clos_uplink_bandwidth_gbps", 400.0))
         return (
             f"Each Union first joins a {local_group_size}P local full-mesh with {local_group_size - 1} x 400 Gbps links, "
             f"then adds 2 x {uplink_bandwidth:.0f} Gbps uplinks to two different leaf switches in the same plane. "
