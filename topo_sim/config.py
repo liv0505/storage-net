@@ -26,7 +26,10 @@ class AnalysisConfig:
             "Clos-192",
             "Clos-256",
             "Clos-4P-FullMesh",
+            "Clos-4P-Ring",
             "DF",
+            "DF-3Local-2Global",
+            "DF-3Local-1Global",
             "SparseMesh-Local",
             "SparseMesh-Global",
         ]

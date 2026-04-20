@@ -33,7 +33,10 @@ def test_available_topologies_only_exposes_new_names():
         "Clos-192",
         "Clos-256",
         "Clos-4P-FullMesh",
+        "Clos-4P-Ring",
         "DF",
+        "DF-3Local-2Global",
+        "DF-3Local-1Global",
         "SparseMesh-Local",
         "SparseMesh-Global",
         "DF-Shuffled",
@@ -289,6 +292,19 @@ def test_clos_4p_fullmesh_uses_expected_counts_and_leaf_uplinks():
     ]
     assert all(count == 128 for count in leaf_fanout)
 
+    leaf_uplink_bandwidths = {
+        float(data["bandwidth_gbps"])
+        for _, _, data in g.edges(data=True)
+        if data.get("topology_role") == "clos4p_leaf_uplink"
+    }
+    leaf_uplink_parallel_links = {
+        int(data.get("parallel_links", 1))
+        for _, _, data in g.edges(data=True)
+        if data.get("topology_role") == "clos4p_leaf_uplink"
+    }
+    assert leaf_uplink_bandwidths == {400.0}
+    assert leaf_uplink_parallel_links == {1}
+
 
 def test_clos_4p_fullmesh_groups_unions_into_plane_local_4p_fullmesh_blocks():
     g = build_topology("Clos-4P-FullMesh", AnalysisConfig())
@@ -307,6 +323,83 @@ def test_clos_4p_fullmesh_groups_unions_into_plane_local_4p_fullmesh_blocks():
             for dst_union in group[src_index + 1 :]:
                 assert g.has_edge(src_union, dst_union)
                 assert g.edges[src_union, dst_union]["topology_role"] == "clos4p_local_fullmesh"
+
+    assert not g.has_edge("en0:union0", "en0:union1")
+    assert not g.has_edge("clos_leaf_plane0_uplink0", "clos_leaf_plane0_uplink1")
+
+
+def test_clos_4p_ring_uses_expected_counts_and_leaf_uplinks():
+    g = build_topology("Clos-4P-Ring", AnalysisConfig())
+
+    exchange_ids = {
+        data.get("exchange_node_id")
+        for _, data in g.nodes(data=True)
+        if data.get("exchange_node_id") is not None
+    }
+    assert len(exchange_ids) == 128
+
+    leaf_nodes = [n for n, d in g.nodes(data=True) if d.get("node_role") == "clos_leaf"]
+    assert len(leaf_nodes) == 4
+
+    union_backend_degree = {
+        node_id: _backend_ports_for_union(g, node_id)
+        for node_id, node_data in g.nodes(data=True)
+        if node_data.get("node_role") == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {6}
+
+    leaf_fanout = [
+        sum(
+            1
+            for _, _, data in g.edges(node_id, data=True)
+            if data.get("link_kind") == "backend_interconnect"
+        )
+        for node_id in leaf_nodes
+    ]
+    assert all(count == 128 for count in leaf_fanout)
+
+    leaf_uplink_bandwidths = {
+        float(data["bandwidth_gbps"])
+        for _, _, data in g.edges(data=True)
+        if data.get("topology_role") == "clos4p_leaf_uplink"
+    }
+    leaf_uplink_parallel_links = {
+        int(data.get("parallel_links", 1))
+        for _, _, data in g.edges(data=True)
+        if data.get("topology_role") == "clos4p_leaf_uplink"
+    }
+    assert leaf_uplink_bandwidths == {800.0}
+    assert leaf_uplink_parallel_links == {2}
+
+
+def test_clos_4p_ring_groups_unions_into_plane_local_4p_ring_blocks():
+    g = build_topology("Clos-4P-Ring", AnalysisConfig())
+
+    backend_roles = [
+        data.get("topology_role")
+        for _, _, data in g.edges(data=True)
+        if data.get("link_kind") == "backend_interconnect"
+    ]
+    assert set(backend_roles) == {"clos4p_local_ring", "clos4p_leaf_uplink"}
+
+    plane0_group0 = [f"en{idx}:union0" for idx in range(4)]
+    plane1_group0 = [f"en{idx}:union1" for idx in range(4)]
+    for group in (plane0_group0, plane1_group0):
+        expected_ring_edges = {
+            (group[0], group[1]),
+            (group[1], group[2]),
+            (group[2], group[3]),
+            (group[3], group[0]),
+        }
+        actual_ring_edges = {
+            tuple(sorted((u, v)))
+            for u, v, data in g.edges(data=True)
+            if data.get("topology_role") == "clos4p_local_ring" and u in group and v in group
+        }
+        assert actual_ring_edges == {tuple(sorted(edge)) for edge in expected_ring_edges}
+        assert not g.has_edge(group[0], group[2])
+        assert not g.has_edge(group[1], group[3])
 
     assert not g.has_edge("en0:union0", "en0:union1")
     assert not g.has_edge("clos_leaf_plane0_uplink0", "clos_leaf_plane0_uplink1")
@@ -427,6 +520,44 @@ def test_df_shuffled_matches_df_scale_and_port_budget():
     assert set(union_backend_degree.values()) == {6}
 
 
+def test_df_3local_2global_reduces_scale_and_uses_five_backend_ports():
+    g = build_topology("DF-3Local-2Global", AnalysisConfig())
+
+    assert g.graph["df_server_count"] == 9
+    assert g.graph["df_total_server_count"] == 18
+    assert g.graph["df_local_topology"] == "fullmesh"
+    assert g.graph["df_plane_count"] == 2
+    assert g.graph["df_base_global_ports_per_union"] == 2
+    assert g.graph["df_global_ports_per_union"] == 2
+
+    union_backend_degree = {
+        node_id: _backend_ports_for_union(g, node_id)
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {5}
+
+
+def test_df_3local_1global_reduces_scale_and_uses_four_backend_ports():
+    g = build_topology("DF-3Local-1Global", AnalysisConfig())
+
+    assert g.graph["df_server_count"] == 5
+    assert g.graph["df_total_server_count"] == 10
+    assert g.graph["df_local_topology"] == "fullmesh"
+    assert g.graph["df_plane_count"] == 2
+    assert g.graph["df_base_global_ports_per_union"] == 1
+    assert g.graph["df_global_ports_per_union"] == 1
+
+    union_backend_degree = {
+        node_id: _backend_ports_for_union(g, node_id)
+        for node_id, node_data in g.nodes(data=True)
+        if node_data["node_role"] == "union"
+    }
+    assert union_backend_degree
+    assert set(union_backend_degree.values()) == {4}
+
+
 def test_df_scaleup_uses_ring_local_links_and_more_servers():
     g = build_topology("DF-ScaleUp", AnalysisConfig())
 
@@ -544,6 +675,8 @@ def test_df_2p_double_bridge_3global_adds_server_bridge_with_dual_plane_budget()
     ("name", "expected_plane_unions", "expected_total_ssus", "expected_total_unions"),
     [
         ("DF", 52, 416, 104),
+        ("DF-3Local-2Global", 36, 288, 72),
+        ("DF-3Local-1Global", 20, 160, 40),
         ("DF-Shuffled", 52, 416, 104),
         ("DF-ScaleUp", 68, 544, 136),
         ("DF-2P-Double-4Global", 68, 544, 136),
@@ -597,7 +730,10 @@ def test_df_variants_share_ssus_across_two_backend_plane_components(
         ("Clos-192", 192, 48, 384, 192),
         ("Clos-256", 256, 64, 512, 256),
         ("Clos-4P-FullMesh", 1024, 256, 2048, 896),
+        ("Clos-4P-Ring", 1024, 256, 2048, 1280),
         ("DF", 416, 104, 832, 312),
+        ("DF-3Local-2Global", 288, 72, 576, 180),
+        ("DF-3Local-1Global", 160, 40, 320, 80),
         ("DF-Shuffled", 416, 104, 832, 312),
         ("DF-ScaleUp", 544, 136, 1088, 408),
         ("DF-2P-Double-4Global", 544, 136, 1088, 408),

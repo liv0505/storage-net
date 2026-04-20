@@ -83,6 +83,14 @@ def test_clos_4p_fullmesh_bisection_matches_dual_leaf_cut_formula():
     assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(200.0)
 
 
+def test_clos_4p_ring_bisection_matches_dual_leaf_cut_formula():
+    g = build_topology("Clos-4P-Ring", AnalysisConfig())
+    metrics = compute_structural_metrics(g)
+
+    assert metrics["bisection_bandwidth_gbps"] == pytest.approx(204800.0)
+    assert metrics["bisection_bandwidth_gbps_per_ssu"] == pytest.approx(400.0)
+
+
 @pytest.mark.parametrize(
     ("name", "expected_bisection_gbps"),
     [
@@ -132,6 +140,20 @@ def test_a2a_metrics_return_throughput_completion_and_percentiles():
 def test_clos_4p_fullmesh_metrics_return_positive_values_for_small_ecmp_workload():
     cfg = AnalysisConfig()
     g = build_topology("Clos-4P-FullMesh", cfg)
+    demands = [FlowDemand(src="en0:ssu0", dst="en4:ssu0", bits=_message_bits(cfg))]
+
+    result = evaluate_workload(g, demands, routing_mode="ECMP", cfg=cfg)
+
+    assert result["completion_time_s"] > 0
+    assert result["per_ssu_throughput_gbps"] > 0
+    assert result["average_hops"] == pytest.approx(4.0)
+    assert result["max_link_utilization"] > 0
+    assert result["link_utilization_cv"] >= 0
+
+
+def test_clos_4p_ring_metrics_return_positive_values_for_small_ecmp_workload():
+    cfg = AnalysisConfig()
+    g = build_topology("Clos-4P-Ring", cfg)
     demands = [FlowDemand(src="en0:ssu0", dst="en4:ssu0", bits=_message_bits(cfg))]
 
     result = evaluate_workload(g, demands, routing_mode="ECMP", cfg=cfg)

@@ -26,6 +26,8 @@ _CLOS_4P_FULLMESH_GROUPS_PER_PLANE = 32
 _CLOS_4P_FULLMESH_PLANES = 2
 _CLOS_4P_FULLMESH_LEAFS_PER_PLANE = 2
 _CLOS_4P_FULLMESH_LEAF_UPLINK_BW_GBPS = 400.0
+_CLOS_4P_RING_LEAF_UPLINK_BW_GBPS = 800.0
+_CLOS_4P_RING_LEAF_UPLINK_PARALLEL_LINKS = 2
 _CLOS_4P_FULLMESH_EXCHANGE_NODE_COUNT = (
     _CLOS_4P_FULLMESH_GROUP_SIZE * _CLOS_4P_FULLMESH_GROUPS_PER_PLANE
 )
@@ -1234,7 +1236,14 @@ def _build_clos_variant(
     return _annotate_graph(g, cfg)
 
 
-def build_clos_4p_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
+def _build_clos_4p_leaf_variant(
+    cfg: AnalysisConfig,
+    *,
+    topology_key: str,
+    local_topology: str,
+    uplink_bandwidth_gbps: float,
+    uplink_parallel_links: int = 1,
+) -> nx.Graph:
     g = nx.Graph()
     exchange_nodes = [
         _add_exchange_node(g, f"en{idx}", cfg)
@@ -1273,10 +1282,19 @@ def build_clos_4p_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
                 exchange_nodes[group_start + offset]["unions"][plane_index]
                 for offset in range(_CLOS_4P_FULLMESH_GROUP_SIZE)
             ]
-            _add_df_server_fullmesh_links(g, union_ids)
-            for src_index, src_union_id in enumerate(union_ids):
-                for dst_union_id in union_ids[src_index + 1 :]:
-                    g.edges[src_union_id, dst_union_id]["topology_role"] = "clos4p_local_fullmesh"
+            if local_topology == "fullmesh":
+                _add_df_server_fullmesh_links(g, union_ids)
+                for src_index, src_union_id in enumerate(union_ids):
+                    for dst_union_id in union_ids[src_index + 1 :]:
+                        g.edges[src_union_id, dst_union_id]["topology_role"] = "clos4p_local_fullmesh"
+            elif local_topology == "ring":
+                _add_df_server_ring_links(g, union_ids)
+                for src_index in range(len(union_ids)):
+                    dst_index = (src_index + 1) % len(union_ids)
+                    if src_index < dst_index or dst_index == 0:
+                        g.edges[union_ids[src_index], union_ids[dst_index]]["topology_role"] = "clos4p_local_ring"
+            else:
+                raise ValueError(f"Unsupported Clos 4P local topology: {local_topology}")
 
         for exchange in exchange_nodes:
             union_id = exchange["unions"][plane_index]
@@ -1286,23 +1304,45 @@ def build_clos_4p_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
                     union_id,
                     leaf_id,
                     topology_role="clos4p_leaf_uplink",
-                    bandwidth_gbps=_CLOS_4P_FULLMESH_LEAF_UPLINK_BW_GBPS,
+                    bandwidth_gbps=uplink_bandwidth_gbps,
+                    parallel_links=uplink_parallel_links,
                 )
 
     _validate_clos_leaf_fanout(g)
     g.graph["topology_family"] = "CLOS"
-    g.graph["clos_variant"] = "Clos-4P-FullMesh"
+    g.graph["clos_variant"] = topology_key
     g.graph["clos_plane_count"] = _CLOS_4P_FULLMESH_PLANES
     g.graph["clos_exchange_count"] = _CLOS_4P_FULLMESH_EXCHANGE_NODE_COUNT
     g.graph["clos_switch_count_per_plane"] = _CLOS_4P_FULLMESH_LEAFS_PER_PLANE
     g.graph["clos_total_switch_count"] = _CLOS_4P_FULLMESH_PLANES * _CLOS_4P_FULLMESH_LEAFS_PER_PLANE
     g.graph["clos_switch_role"] = "clos_leaf"
+    g.graph["clos_local_topology"] = local_topology
     g.graph["clos_local_group_size"] = _CLOS_4P_FULLMESH_GROUP_SIZE
     g.graph["clos_local_group_count_per_plane"] = _CLOS_4P_FULLMESH_GROUPS_PER_PLANE
     g.graph["clos_local_bandwidth_gbps"] = _BACKEND_BW_GBPS
-    g.graph["clos_uplink_bandwidth_gbps"] = _CLOS_4P_FULLMESH_LEAF_UPLINK_BW_GBPS
+    g.graph["clos_uplink_bandwidth_gbps"] = uplink_bandwidth_gbps
+    g.graph["clos_uplink_parallel_links"] = uplink_parallel_links
     g.graph["exchange_projection_fast_path"] = True
     return _annotate_graph(g, cfg)
+
+
+def build_clos_4p_fullmesh(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_clos_4p_leaf_variant(
+        cfg,
+        topology_key="Clos-4P-FullMesh",
+        local_topology="fullmesh",
+        uplink_bandwidth_gbps=_CLOS_4P_FULLMESH_LEAF_UPLINK_BW_GBPS,
+    )
+
+
+def build_clos_4p_ring(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_clos_4p_leaf_variant(
+        cfg,
+        topology_key="Clos-4P-Ring",
+        local_topology="ring",
+        uplink_bandwidth_gbps=_CLOS_4P_RING_LEAF_UPLINK_BW_GBPS,
+        uplink_parallel_links=_CLOS_4P_RING_LEAF_UPLINK_PARALLEL_LINKS,
+    )
 
 
 def build_df(cfg: AnalysisConfig) -> nx.Graph:
@@ -1312,6 +1352,28 @@ def build_df(cfg: AnalysisConfig) -> nx.Graph:
         local_topology="fullmesh",
         global_pattern="contiguous",
         external_servers_per_union=int(cfg.df_external_servers_per_union),
+        plane_count=2,
+    )
+
+
+def build_df_3local_2global(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_df_variant(
+        cfg,
+        topology_key="DF-3Local-2Global",
+        local_topology="fullmesh",
+        global_pattern="contiguous",
+        external_servers_per_union=2,
+        plane_count=2,
+    )
+
+
+def build_df_3local_1global(cfg: AnalysisConfig) -> nx.Graph:
+    return _build_df_variant(
+        cfg,
+        topology_key="DF-3Local-1Global",
+        local_topology="fullmesh",
+        global_pattern="contiguous",
+        external_servers_per_union=1,
         plane_count=2,
     )
 
@@ -1410,7 +1472,10 @@ BUILDERS: dict[str, TopologyBuilder] = {
     "Clos-192": build_clos_192,
     "Clos-256": build_clos_256,
     "Clos-4P-FullMesh": build_clos_4p_fullmesh,
+    "Clos-4P-Ring": build_clos_4p_ring,
     "DF": build_df,
+    "DF-3Local-2Global": build_df_3local_2global,
+    "DF-3Local-1Global": build_df_3local_1global,
     "SparseMesh-Local": build_sparsemesh_local,
     "SparseMesh-Global": build_sparsemesh_global,
     "DF-Shuffled": build_df_shuffled,

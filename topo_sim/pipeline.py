@@ -80,6 +80,10 @@ def _is_clos_name(name: str) -> bool:
     return upper == "CLOS" or upper.startswith("CLOS-")
 
 
+def _is_clos_4p_leaf_name(name: str) -> bool:
+    return str(name).strip() in {"Clos-4P-FullMesh", "Clos-4P-Ring"}
+
+
 def _is_torus_name(name: str) -> bool:
     return is_torus_topology_name(name)
 
@@ -427,6 +431,16 @@ def _topology_pattern(name: str, g: nx.Graph, cfg: AnalysisConfig) -> str:
                 f"Each Union uses {local_ports} local 400 Gbps links and {global_ports} global 400 Gbps links inside {plane_phrase}, "
                 "and every physical group contributes its union0 to plane 0 and union1 to plane 1."
             )
+        if name == "DF-3Local-2Global":
+            return (
+                f"Each Union uses {local_ports} local 400 Gbps links and {global_ports} global 400 Gbps links inside {plane_phrase}, "
+                "so the Dragon-Fly plane stays fully local-connected but scales down the inter-group radix."
+            )
+        if name == "DF-3Local-1Global":
+            return (
+                f"Each Union uses {local_ports} local 400 Gbps links and {global_ports} global 400 Gbps links inside {plane_phrase}, "
+                "further shrinking inter-group reach to emphasize local full-mesh richness over scale."
+            )
         if name == "DF-Shuffled":
             return (
                 f"Each Union still uses {local_ports} local 400 Gbps links and {global_ports} global 400 Gbps links inside {plane_phrase}, "
@@ -467,12 +481,20 @@ def _topology_pattern(name: str, g: nx.Graph, cfg: AnalysisConfig) -> str:
             f"The two Union chips inside each exchange node belong to two independent sparsemesh planes with no Union-to-Union local bridge. "
             f"This variant is biased toward {style} connectivity while preserving ring diameter 2."
         )
-    if name == "Clos-4P-FullMesh":
+    if _is_clos_4p_leaf_name(name):
+        local_topology = str(g.graph.get("clos_local_topology", "fullmesh")).strip().lower()
         local_group_size = int(g.graph.get("clos_local_group_size", 4))
         local_group_count = int(g.graph.get("clos_local_group_count_per_plane", 0))
-        uplink_bandwidth = float(g.graph.get("clos_uplink_bandwidth_gbps", 400.0))
+        uplink_bandwidth = float(
+            g.graph.get(
+                "clos_uplink_bandwidth_gbps",
+                800.0 if local_topology == "ring" else 400.0,
+            )
+        )
+        local_label = "ring" if local_topology == "ring" else "full-mesh"
+        local_links_per_union = 2 if local_topology == "ring" else max(1, local_group_size - 1)
         return (
-            f"Each Union first joins a {local_group_size}P local full-mesh with {local_group_size - 1} x 400 Gbps links, "
+            f"Each Union first joins a {local_group_size}P local {local_label} with {local_links_per_union} x 400 Gbps local links, "
             f"then adds 2 x {uplink_bandwidth:.0f} Gbps uplinks to two different leaf switches in the same plane. "
             f"Each plane contains {local_group_count} such local groups and two leaf switches, with no leaf-to-leaf link."
         )
@@ -509,7 +531,7 @@ def _topology_configuration(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict
     else:
         backend_ports_per_union = (
             cfg.clos_uplinks_per_exchange_node
-            if _is_clos_name(name) and name != "Clos-4P-FullMesh"
+            if _is_clos_name(name) and not _is_clos_4p_leaf_name(name)
             else _backend_ports_per_union(g)
         )
 
@@ -523,10 +545,10 @@ def _topology_configuration(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict
         "backend_ports_per_union": backend_ports_per_union,
         "backend_pattern": _topology_pattern(name, g, cfg),
     }
-    if _is_clos_name(name) and name != "Clos-4P-FullMesh":
+    if _is_clos_name(name) and not _is_clos_4p_leaf_name(name):
         topology_cfg["clos_uplinks_per_union_plane"] = cfg.clos_uplinks_per_exchange_node
         topology_cfg["clos_total_uplinks_per_exchange_node"] = cfg.clos_uplinks_per_exchange_node * 2
-    if name == "Clos-4P-FullMesh":
+    if _is_clos_4p_leaf_name(name):
         topology_cfg["clos_plane_count"] = int(g.graph.get("clos_plane_count", 2))
         topology_cfg["clos_local_group_size"] = int(g.graph.get("clos_local_group_size", 4))
         topology_cfg["clos_local_group_count_per_plane"] = int(g.graph.get("clos_local_group_count_per_plane", 0))
@@ -651,6 +673,13 @@ def _routing_configuration(name: str, cfg: AnalysisConfig) -> dict[str, Any]:
             )
             notes.append(
                 "if source and destination Unions already share the same local 4P full-mesh group, routing takes that shorter direct local link instead of going up to the leaf layer"
+            )
+        elif name == "Clos-4P-Ring":
+            notes.append(
+                "ECMP splits inter-group traffic across equal-cost shortest paths through the two leaf switches in each plane"
+            )
+            notes.append(
+                "if source and destination Unions can stay on a shortest local 4P ring path, routing keeps that traffic local instead of forcing it up to the leaf layer"
             )
         else:
             notes.append("ECMP splits Clos traffic across equal-cost shortest paths through the upper Union stage")
@@ -830,7 +859,9 @@ def _routing_mode_description(mode: str, topology_name: str, cfg: AnalysisConfig
         return f"Uses every backend egress; prefers shortest paths and allows up to {cfg.port_balanced_max_detour_hops} extra hop(s) if needed."
     if mode == "ECMP":
         if topology_name == "Clos-4P-FullMesh":
-            return "Splits traffic across equal-cost leaf-switch paths after preferring any shorter local 4P full-mesh hop."
+            return "Splits traffic across equal-cost leaf-switch paths after preferring any direct local 4P full-mesh path."
+        if topology_name == "Clos-4P-Ring":
+            return "Splits traffic across equal-cost leaf-switch paths after preferring any shortest local 4P ring path."
         return "Splits Clos traffic across equal-cost spine paths."
     return "Topology-specific routing behavior."
 

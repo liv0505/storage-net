@@ -29,7 +29,10 @@ def test_analysis_config_defaults_match_ssu_design():
         "Clos-192",
         "Clos-256",
         "Clos-4P-FullMesh",
+        "Clos-4P-Ring",
         "DF",
+        "DF-3Local-2Global",
+        "DF-3Local-1Global",
         "SparseMesh-Local",
         "SparseMesh-Global",
     ]
@@ -68,10 +71,25 @@ def test_parse_args_accepts_df_topology(monkeypatch):
     assert args.topologies == "DF"
 
 
+def test_parse_args_accepts_new_df_global_port_variants(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["main.py", "--topologies", "DF-3Local-2Global,DF-3Local-1Global"],
+    )
+    args = parse_args()
+    assert args.topologies == "DF-3Local-2Global,DF-3Local-1Global"
+
+
 def test_parse_args_accepts_clos_4p_fullmesh_topology(monkeypatch):
     monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "Clos-4P-FullMesh"])
     args = parse_args()
     assert args.topologies == "Clos-4P-FullMesh"
+
+
+def test_parse_args_accepts_clos_4p_ring_topology(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["main.py", "--topologies", "Clos-4P-Ring"])
+    args = parse_args()
+    assert args.topologies == "Clos-4P-Ring"
 
 
 def test_parse_args_accepts_scaled_clos_topologies(monkeypatch):

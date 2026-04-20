@@ -43,6 +43,10 @@ def _is_clos_name(topology_name: str) -> bool:
     return upper == "CLOS" or upper.startswith("CLOS-")
 
 
+def _is_clos_4p_leaf_name(topology_name: str) -> bool:
+    return str(topology_name).strip() in {"Clos-4P-FullMesh", "Clos-4P-Ring"}
+
+
 def _is_torus_name(topology_name: str) -> bool:
     return is_torus_topology_name(topology_name)
 
@@ -450,9 +454,9 @@ def _explicit_positions(topology_name: str, g: nx.Graph) -> dict[Any, tuple[floa
         return _exchange_grid_positions_2d_torus(g)
     if _torus_family_name(topology_name) == "3D-Torus":
         return _exchange_grid_positions_3d_torus(g)
-    if _is_clos_name(topology_name) and topology_name != "Clos-4P-FullMesh":
+    if _is_clos_name(topology_name) and not _is_clos_4p_leaf_name(topology_name):
         return _exchange_grid_positions_clos(g)
-    if topology_name == "Clos-4P-FullMesh":
+    if _is_clos_4p_leaf_name(topology_name):
         return _exchange_grid_positions_clos_4p_fullmesh(g)
     if _is_df_name(topology_name):
         return _exchange_grid_positions_df(g)
@@ -616,6 +620,15 @@ def _edge_curve_factor(
         parity_sign = -1.0 if ((src_local + dst_local) % 2 == 0) else 1.0
         return parity_sign * min(0.30, 0.12 + (0.05 * gap))
 
+    if topology_name == "Clos-4P-Ring" and topology_role == "clos4p_local_ring":
+        src_local = int(g.nodes[u].get("clos_local_group_slot", 0))
+        dst_local = int(g.nodes[v].get("clos_local_group_slot", 0))
+        gap = abs(src_local - dst_local)
+        group_size = int(g.graph.get("clos_local_group_size", 4))
+        gap = min(gap, max(1, group_size - gap))
+        parity_sign = -1.0 if ((src_local + dst_local) % 2 == 0) else 1.0
+        return parity_sign * min(0.22, 0.10 + (0.04 * gap))
+
     if _torus_family_name(topology_name) == "2D-Torus" and topology_role in {"2d_torus_x", "2d_torus_y"}:
         union_plane = int(g.nodes[u].get("local_index", 0))
         plane_sign = -1.0 if union_plane == 0 else 1.0
@@ -659,7 +672,7 @@ def _edge_path_points(
     v: str,
     edge_data: dict[str, Any],
     *,
-    point_count: int = 13,
+    point_count: int = 5,
     curve_bias: float = 0.0,
 ) -> list[tuple[float, float]]:
     x0, y0 = pos[u]
@@ -717,7 +730,7 @@ def _parallel_edge_paths(
     v: str,
     edge_data: dict[str, Any],
     *,
-    point_count: int = 13,
+    point_count: int = 5,
 ) -> list[list[tuple[float, float]]]:
     return [
         _edge_path_points(
@@ -856,10 +869,12 @@ def _layout_notes(topology_name: str) -> list[str]:
     base_note = "SSUs stay on the bottom row and Unions sit on the layer above inside each exchange node."
     if _torus_family_name(topology_name) == "3D-Torus":
         return [base_note, "Exchange nodes are grouped into paired z-layers, each rendered as one 4x4 plane block."]
-    if _is_clos_name(topology_name) and topology_name != "Clos-4P-FullMesh":
+    if _is_clos_name(topology_name) and not _is_clos_4p_leaf_name(topology_name):
         return [base_note, "Clos spine layer sits above the exchange-node Union layer for structured two-level viewing."]
     if topology_name == "Clos-4P-FullMesh":
         return [base_note, "Two leaf switches per plane sit above the exchange-node Union layer; each plane also contains local 4P full-mesh Union groups."]
+    if topology_name == "Clos-4P-Ring":
+        return [base_note, "Two leaf switches per plane sit above the exchange-node Union layer; each plane also contains local 4P ring Union groups."]
     if _is_df_name(topology_name):
         return [
             base_note,
@@ -1602,21 +1617,24 @@ def _all_topology_page_order(topology_name: str) -> int:
         "Clos-192": 3,
         "Clos-256": 4,
         "Clos-4P-FullMesh": 5,
-        "2D-FullMesh": 6,
-        "2D-FullMesh-2x4": 7,
-        "2D-Torus": 8,
-        "2D-Torus-BestTwist": 9,
-        "3D-Torus": 10,
-        "3D-Torus-BestTwist": 11,
-        "3D-Torus-2x4x3": 12,
-        "3D-Torus-2x4x3-BestTwist": 13,
-        "3D-Torus-2x4x2": 14,
-        "3D-Torus-2x4x2-BestTwist": 15,
-        "3D-Torus-2x4x1": 16,
-        "3D-Torus-2x4x1-BestTwist": 17,
-        "DF": 18,
-        "SparseMesh-Local": 19,
-        "SparseMesh-Global": 20,
+        "Clos-4P-Ring": 6,
+        "2D-FullMesh": 7,
+        "2D-FullMesh-2x4": 8,
+        "2D-Torus": 9,
+        "2D-Torus-BestTwist": 10,
+        "3D-Torus": 11,
+        "3D-Torus-BestTwist": 12,
+        "3D-Torus-2x4x3": 13,
+        "3D-Torus-2x4x3-BestTwist": 14,
+        "3D-Torus-2x4x2": 15,
+        "3D-Torus-2x4x2-BestTwist": 16,
+        "3D-Torus-2x4x1": 17,
+        "3D-Torus-2x4x1-BestTwist": 18,
+        "DF": 19,
+        "DF-3Local-2Global": 20,
+        "DF-3Local-1Global": 21,
+        "SparseMesh-Local": 22,
+        "SparseMesh-Global": 23,
     }
     return int(order.get(str(topology_name), 10_000))
 
@@ -1661,6 +1679,7 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
     clos_192 = get_item("Clos-192")
     clos_256 = get_item("Clos-256")
     clos_4p = get_item("Clos-4P-FullMesh")
+    clos_4p_ring = get_item("Clos-4P-Ring")
     fullmesh = get_item("2D-FullMesh")
     fullmesh_small = get_item("2D-FullMesh-2x4")
     sparse_global = get_item("SparseMesh-Global")
@@ -1674,6 +1693,8 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
     torus3_2x4x1 = get_item("3D-Torus-2x4x1")
     torus3_2x4x1_twist = get_item("3D-Torus-2x4x1-BestTwist")
     dragonfly = get_item("DF")
+    dragonfly_3l2g = get_item("DF-3Local-2Global")
+    dragonfly_3l1g = get_item("DF-3Local-1Global")
     torus3 = get_item("3D-Torus")
     torus2 = get_item("2D-Torus")
 
@@ -1686,6 +1707,7 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
         or clos_192 is not None
         or clos_256 is not None
         or clos_4p is not None
+        or clos_4p_ring is not None
         or fullmesh is not None
     ):
         first_parts: list[str] = []
@@ -1714,6 +1736,12 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
                 f"{clos_4p['display_name']} 走的是“4P 本地 FullMesh + 双 Leaf 上联”结构，"
                 f"A2A 每 SSU 吞吐为 {a2a_tp(clos_4p):.0f} Gbps，"
                 f"每 SSU 对分带宽为 {bisection(clos_4p):.0f} Gbps。"
+            )
+        if clos_4p_ring is not None:
+            first_parts.append(
+                f"{clos_4p_ring['display_name']} 改成“4P 本地 Ring + 双 Leaf 上联”后，"
+                f"A2A 每 SSU 吞吐为 {a2a_tp(clos_4p_ring):.0f} Gbps，"
+                f"每 SSU 对分带宽为 {bisection(clos_4p_ring):.0f} Gbps。"
             )
         if fullmesh is not None:
             first_parts.append(
@@ -1822,6 +1850,8 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
         item
         for item in (
             dragonfly,
+            dragonfly_3l2g,
+            dragonfly_3l1g,
             torus3,
             torus2,
             fullmesh_small,
@@ -1837,6 +1867,21 @@ def _all_topology_comparison_summary(results: list[dict[str, Any]]) -> list[dict
             fourth_parts.append(
                 f"{dragonfly['display_name']} 的规模最大，共 {ssu_count(dragonfly)} 个 SSU，"
                 f"A2A 每 SSU 吞吐为 {a2a_tp(dragonfly):.0f} Gbps。"
+            )
+        df_variant_notes: list[str] = []
+        if dragonfly_3l2g is not None:
+            df_variant_notes.append(
+                f"{dragonfly_3l2g['display_name']} {ssu_count(dragonfly_3l2g)} SSU / {a2a_tp(dragonfly_3l2g):.0f} Gbps"
+            )
+        if dragonfly_3l1g is not None:
+            df_variant_notes.append(
+                f"{dragonfly_3l1g['display_name']} {ssu_count(dragonfly_3l1g)} SSU / {a2a_tp(dragonfly_3l1g):.0f} Gbps"
+            )
+        if df_variant_notes:
+            fourth_parts.append(
+                "把默认 Dragon-Fly 的 global 端口继续缩到更低时，"
+                + "、".join(df_variant_notes)
+                + "；规模会同步收缩，但每 SSU 的全局切分能力也会继续下降。"
             )
         torus_notes: list[str] = []
         if torus3 is not None:
@@ -1956,7 +2001,7 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
             blocks,
             key=lambda item: (_all_topology_page_order(str(item["name"])), str(item["display_name"])),
         ),
-        comparison_summary=_all_topology_comparison_summary(blocks),
+        comparison_summary=[],
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding='utf-8')
