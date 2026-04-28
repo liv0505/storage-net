@@ -12,6 +12,8 @@ TopologyBuilder = Callable[[AnalysisConfig], nx.Graph]
 
 _BACKEND_BW_GBPS = 400.0
 _INTERNAL_BW_GBPS = 200.0
+_DPU_LINK_BW_GBPS = 400.0
+_NPU_LINK_BW_GBPS = 400.0
 _MIN_CLOS_UPLINKS_PER_PLANE = 1
 _MAX_CLOS_UPLINKS_PER_PLANE = 6
 _CLOS_EXCHANGE_NODE_COUNT = 18
@@ -257,6 +259,8 @@ def _validate_df_pair_bridge_shape(cfg: AnalysisConfig) -> None:
 def _add_exchange_node(g: nx.Graph, exchange_node_id: str, cfg: AnalysisConfig) -> dict[str, list[str]]:
     union_ids: list[str] = []
     ssu_ids: list[str] = []
+    dpu_ids: list[str] = []
+    npu_ids: list[str] = []
 
     for union_index in range(2):
         union_id = f"{exchange_node_id}:union{union_index}"
@@ -289,7 +293,47 @@ def _add_exchange_node(g: nx.Graph, exchange_node_id: str, cfg: AnalysisConfig) 
                 topology_role="exchange_internal",
             )
 
-    return {"ssus": ssu_ids, "unions": union_ids}
+    for dpu_index in range(4):
+        dpu_id = f"{exchange_node_id}:dpu{dpu_index}"
+        g.add_node(
+            dpu_id,
+            node_type="switch",
+            node_role="dpu",
+            exchange_node_id=exchange_node_id,
+            local_index=dpu_index,
+        )
+        dpu_ids.append(dpu_id)
+
+        for union_id in union_ids:
+            g.add_edge(
+                dpu_id,
+                union_id,
+                bandwidth_gbps=_DPU_LINK_BW_GBPS,
+                link_kind="internal_dpu_downlink",
+                topology_role="exchange_dpu_downlink",
+            )
+
+        for npu_offset in range(2):
+            npu_index = (dpu_index * 2) + npu_offset
+            npu_id = f"{exchange_node_id}:npu{npu_index}"
+            g.add_node(
+                npu_id,
+                node_type="endpoint",
+                node_role="npu",
+                exchange_node_id=exchange_node_id,
+                local_index=npu_index,
+                dpu_local_index=dpu_index,
+            )
+            npu_ids.append(npu_id)
+            g.add_edge(
+                npu_id,
+                dpu_id,
+                bandwidth_gbps=_NPU_LINK_BW_GBPS,
+                link_kind="internal_npu_uplink",
+                topology_role="exchange_npu_uplink",
+            )
+
+    return {"ssus": ssu_ids, "unions": union_ids, "dpus": dpu_ids, "npus": npu_ids}
 
 
 def _add_backend_link(

@@ -89,7 +89,11 @@ def _default_throughput_rows(item: dict[str, Any]) -> list[list[str]]:
     return [
         ["Workload", "Route", "Per SSU Throughput (Gbps)"],
         ["A2A", label, f"{highlight['a2a_per_ssu_throughput_gbps']:.2f}"],
-        [display_workload_name("Sparse 1-to-N"), label, f"{highlight['sparse_per_ssu_throughput_gbps']:.2f}"],
+        [
+            display_workload_name("Replica-3 Topology-Aware"),
+            label,
+            f"{highlight['replica_topology_aware_per_ssu_throughput_gbps']:.2f}",
+        ],
     ]
 
 
@@ -241,7 +245,7 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
         "Bisection BW (Gbps)",
         "Bisection BW / SSU",
         "Default Route Throughput (Gbps)",
-        "Sparse P95 Completion (ms)",
+        "3-Replica Aware Completion (ms)",
     ]]
     for item in results:
         summary_rows.append(
@@ -252,7 +256,9 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
                 _fmt_value(item["structural_metrics"]["bisection_bandwidth_gbps"]),
                 _fmt_value(item["structural_metrics"]["bisection_bandwidth_gbps_per_ssu"]),
                 _fmt_value(item["default_routing_highlight"]["a2a_per_ssu_throughput_gbps"]),
-                _fmt_value(item["communication_metrics"]["Sparse 1-to-N"]["completion_time_p95_s"] * 1e3),
+                _fmt_value(
+                    item["communication_metrics"]["Replica-3 Topology-Aware"]["completion_time_s"] * 1e3
+                ),
             ]
         )
     story.append(_styled_table(summary_rows, [24 * mm, 16 * mm, 20 * mm, 26 * mm, 24 * mm, 38 * mm, 30 * mm]))
@@ -281,8 +287,7 @@ def build_pdf_report(results: list[dict[str, Any]], output_path: Path) -> Path:
                 "routing_mode": item["routing"]["mode"],
                 "message_size_mb": item["workloads"]["message_size_mb"],
                 "a2a_scope": item["workloads"]["a2a_scope"],
-                "sparse_active_ratio": item["workloads"]["sparse_active_ratio"],
-                "sparse_target_count": item["workloads"]["sparse_target_count"],
+                "replica3_scope": item["workloads"]["replica3_scope"],
                 **(
                     {
                         "custom_traffic_file": item["workloads"]["custom_traffic_file"],

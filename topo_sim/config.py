@@ -43,6 +43,11 @@ class AnalysisConfig:
     df_external_servers_per_union: int = 3
     custom_traffic_file: str | None = None
     custom_traffic_name: str = "Custom M-to-N"
+    enable_rack_stripe_workloads: bool = False
+    rack_stripe_source_counts: tuple[int, ...] = (8, 64)
+    rack_stripe_target_count: int = 4
+    enable_npu_write_workloads: bool = False
+    npu_write_source_counts: tuple[int, ...] = (64,)
 
     link_bandwidth_gbps: float = 100.0
     hop_latency_us: float = 2.0

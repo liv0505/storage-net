@@ -47,6 +47,19 @@ def _non_negative_int_arg(value: str) -> int:
     return parsed
 
 
+def _positive_int_list_arg(value: str) -> tuple[int, ...]:
+    parts = [item.strip() for item in value.split(",") if item.strip()]
+    if not parts:
+        raise argparse.ArgumentTypeError("must include at least one positive integer")
+    parsed: list[int] = []
+    for item in parts:
+        number = int(item)
+        if number <= 0:
+            raise argparse.ArgumentTypeError("all values must be > 0")
+        parsed.append(number)
+    return tuple(parsed)
+
+
 def _topologies_arg(value: str, valid_names: set[str]) -> str:
     names = [x.strip() for x in value.split(",") if x.strip()]
     if not names:
@@ -122,6 +135,36 @@ def parse_args() -> argparse.Namespace:
         help="Display name for the custom traffic workload when the input file does not define one.",
     )
     parser.add_argument(
+        "--enable-rack-stripe",
+        action="store_true",
+        default=base_cfg.enable_rack_stripe_workloads,
+        help="Enable rack-local striped KV-cache style workloads.",
+    )
+    parser.add_argument(
+        "--rack-stripe-source-counts",
+        type=_positive_int_list_arg,
+        default=base_cfg.rack_stripe_source_counts,
+        help="Comma-separated active source counts for rack-stripe workloads. Example: 8,64",
+    )
+    parser.add_argument(
+        "--rack-stripe-target-count",
+        type=_positive_int_arg,
+        default=base_cfg.rack_stripe_target_count,
+        help="How many SSUs each active source stripes to inside one target rack.",
+    )
+    parser.add_argument(
+        "--enable-npu-write-workloads",
+        action="store_true",
+        default=base_cfg.enable_npu_write_workloads,
+        help="Enable NPU-to-SSU write workloads with Union ingress sources.",
+    )
+    parser.add_argument(
+        "--npu-write-source-counts",
+        type=_positive_int_list_arg,
+        default=base_cfg.npu_write_source_counts,
+        help="Comma-separated logical NPU source counts. Example: 8,64",
+    )
+    parser.add_argument(
         "--message-size-mb", type=_positive_float_arg, default=base_cfg.message_size_mb
     )
     parser.add_argument(
@@ -151,6 +194,11 @@ def main() -> None:
         df_external_servers_per_union=args.df_external_servers_per_union,
         custom_traffic_file=args.custom_traffic_file,
         custom_traffic_name=args.custom_traffic_name,
+        enable_rack_stripe_workloads=args.enable_rack_stripe,
+        rack_stripe_source_counts=args.rack_stripe_source_counts,
+        rack_stripe_target_count=args.rack_stripe_target_count,
+        enable_npu_write_workloads=args.enable_npu_write_workloads,
+        npu_write_source_counts=args.npu_write_source_counts,
         link_bandwidth_gbps=args.bandwidth_gbps,
         message_size_mb=args.message_size_mb,
         traffic_samples=args.traffic_samples,

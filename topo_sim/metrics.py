@@ -512,6 +512,7 @@ def _accumulate_routed_paths(
         return False, 0.0
 
     bits = float(demand.bits)
+    source_key = str(demand.source_id or demand.src)
     expected_hops = 0.0
     for path in paths:
         split_weight = path.weight / total_weight
@@ -521,7 +522,7 @@ def _accumulate_routed_paths(
         for u, v in zip(path.nodes[:-1], path.nodes[1:]):
             key = _edge_key(u, v)
             edge_load_bits[key] += split_bits
-            source_edge_load_bits[demand.src][key] += split_bits
+            source_edge_load_bits[source_key][key] += split_bits
     return True, float(expected_hops)
 
 
@@ -1001,18 +1002,26 @@ def _evaluate_workload_via_explicit_paths(
         if bits <= 0:
             continue
 
-        active_sources.add(demand.src)
+        active_sources.add(str(demand.source_id or demand.src))
 
-        pair = (demand.src, demand.dst)
-        if pair not in path_cache:
-            path_cache[pair] = compute_paths(g, demand.src, demand.dst, routing_mode, cfg)
+        explicit_paths = getattr(demand, "explicit_paths", None)
+        if explicit_paths:
+            routed_paths = [
+                RoutedPath(nodes=tuple(str(node_id) for node_id in path_nodes), weight=1.0)
+                for path_nodes in explicit_paths
+            ]
+        else:
+            pair = (demand.src, demand.dst)
+            if pair not in path_cache:
+                path_cache[pair] = compute_paths(g, demand.src, demand.dst, routing_mode, cfg)
+            routed_paths = path_cache[pair]
 
         routed, expected_hops = _accumulate_routed_paths(
             edge_load_bits,
             source_edge_load_bits,
             hop_load_bits,
             demand,
-            path_cache[pair],
+            routed_paths,
         )
         if routed:
             routed_demand_bits += bits
@@ -1036,11 +1045,16 @@ def evaluate_workload_with_details(
     routing_mode: str,
     cfg: AnalysisConfig,
 ) -> WorkloadDetails:
-    if _should_use_exact_shortest_path_fast_path(g, routing_mode):
-        return _evaluate_shortest_path_workload_exact_fast(g, demands, cfg)
-    if _should_use_direct_projection_fast_path(g, routing_mode):
-        return _evaluate_direct_workload_projection_fast(g, demands, routing_mode, cfg)
-    return _evaluate_workload_via_explicit_paths(g, demands, routing_mode, cfg)
+    demand_list = demands if isinstance(demands, list) else list(demands)
+    requires_explicit = any(
+        demand.source_id is not None or demand.explicit_paths is not None
+        for demand in demand_list
+    )
+    if not requires_explicit and _should_use_exact_shortest_path_fast_path(g, routing_mode):
+        return _evaluate_shortest_path_workload_exact_fast(g, demand_list, cfg)
+    if not requires_explicit and _should_use_direct_projection_fast_path(g, routing_mode):
+        return _evaluate_direct_workload_projection_fast(g, demand_list, routing_mode, cfg)
+    return _evaluate_workload_via_explicit_paths(g, demand_list, routing_mode, cfg)
 
 
 def evaluate_workload(

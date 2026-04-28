@@ -4,7 +4,7 @@ import csv
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 import networkx as nx
 
@@ -23,7 +23,23 @@ from .topologies import (
     torus_shape,
     torus_base_name,
 )
-from .traffic import build_a2a_demands, build_sparse_random_demands, load_custom_traffic_profile
+from .traffic import (
+    build_a2a_demands,
+    build_npu_write_local_1to1_demands,
+    build_npu_write_local_1to1_pooling_demands,
+    build_npu_write_local_1to1_sharding_demands,
+    build_npu_write_rack_target_set_direct_demands,
+    build_npu_write_rack_target_set_pooling_demands,
+    build_npu_write_rack_target_set_sharding_demands,
+    build_npu_write_single_ssu_hotspot_direct_demands,
+    build_npu_write_single_ssu_hotspot_pooling_demands,
+    build_npu_write_single_ssu_hotspot_sharding_demands,
+    build_rack_stripe_random_demands,
+    build_rack_stripe_topology_aware_demands,
+    build_replica3_random_demands,
+    build_replica3_topology_aware_demands,
+    load_custom_traffic_profile,
+)
 from .visualization import render_html_dashboard
 
 
@@ -53,6 +69,9 @@ _LINK_VOLUME_DISTRIBUTION_HEADERS = [
     "link_count",
     "link_ratio_pct",
 ]
+
+_REPLICA_RANDOM_WORKLOAD = "Replica-3 Random"
+_REPLICA_TOPOLOGY_AWARE_WORKLOAD = "Replica-3 Topology-Aware"
 
 _SPARSEMESH_DISPLAY_VARIANTS = {
     "SparseMesh-Local": {
@@ -187,11 +206,114 @@ def _custom_traffic_profile(g: nx.Graph, cfg: AnalysisConfig) -> dict[str, Any] 
     }
 
 
+def _validated_rack_stripe_source_counts(cfg: AnalysisConfig) -> list[int]:
+    counts: list[int] = []
+    for value in cfg.rack_stripe_source_counts:
+        if type(value) is not int or value <= 0:
+            raise ValueError("rack_stripe_source_counts must contain only integers > 0")
+        if int(value) not in counts:
+            counts.append(int(value))
+    return counts
+
+
+def _validated_npu_write_source_counts(cfg: AnalysisConfig) -> list[int]:
+    counts: list[int] = []
+    for value in cfg.npu_write_source_counts:
+        if type(value) is not int or value <= 0:
+            raise ValueError("npu_write_source_counts must contain only integers > 0")
+        if int(value) not in counts:
+            counts.append(int(value))
+    return counts
+
+
+def _rack_stripe_workload_name(source_count: int, aware: bool) -> str:
+    mode = "Aware" if aware else "Random"
+    return f"Rack-Stripe-4 {mode} ({int(source_count)} src)"
+
+
+def _npu_single_direct_workload_name(source_count: int) -> str:
+    return f"{int(source_count)} NPUs | Local 1:1 | Direct"
+
+
+def _npu_local_1to1_workload_name(source_count: int, mode: str) -> str:
+    return f"{int(source_count)} NPUs | Local 1:1 | {mode}"
+
+
+def _npu_single_ssu_hotspot_workload_name(source_count: int, mode: str) -> str:
+    return f"{int(source_count)} NPUs | Single-SSU Hotspot | {mode}"
+
+
+def _npu_rack_target_set_workload_name(source_count: int, mode: str) -> str:
+    return f"{int(source_count)} NPUs | Rack Target-Set 4 | {mode}"
+
+
 def _workload_demands(g: nx.Graph, cfg: AnalysisConfig) -> dict[str, list[Any]]:
-    workloads = {
-        "A2A": build_a2a_demands(g, cfg),
-        "Sparse 1-to-N": build_sparse_random_demands(g, cfg),
-    }
+    if cfg.enable_npu_write_workloads:
+        workloads = {"A2A": build_a2a_demands(g, cfg)}
+        for source_count in _validated_npu_write_source_counts(cfg):
+            workloads[_npu_local_1to1_workload_name(source_count, "Direct")] = build_npu_write_local_1to1_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+            workloads[_npu_local_1to1_workload_name(source_count, "Rack Pooling")] = build_npu_write_local_1to1_pooling_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+            workloads[_npu_local_1to1_workload_name(source_count, "Rack Sharding")] = build_npu_write_local_1to1_sharding_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+            workloads[_npu_single_ssu_hotspot_workload_name(source_count, "Direct")] = build_npu_write_single_ssu_hotspot_direct_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+            workloads[_npu_single_ssu_hotspot_workload_name(source_count, "Rack Pooling")] = build_npu_write_single_ssu_hotspot_pooling_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+            workloads[_npu_single_ssu_hotspot_workload_name(source_count, "Rack Sharding")] = build_npu_write_single_ssu_hotspot_sharding_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+            workloads[_npu_rack_target_set_workload_name(source_count, "Direct")] = build_npu_write_rack_target_set_direct_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+            workloads[_npu_rack_target_set_workload_name(source_count, "Rack Pooling")] = build_npu_write_rack_target_set_pooling_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+            workloads[_npu_rack_target_set_workload_name(source_count, "Rack Sharding")] = build_npu_write_rack_target_set_sharding_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+    else:
+        workloads = {
+            "A2A": build_a2a_demands(g, cfg),
+            _REPLICA_RANDOM_WORKLOAD: build_replica3_random_demands(g, cfg),
+            _REPLICA_TOPOLOGY_AWARE_WORKLOAD: build_replica3_topology_aware_demands(g, cfg),
+        }
+    if cfg.enable_rack_stripe_workloads:
+        for source_count in _validated_rack_stripe_source_counts(cfg):
+            workloads[_rack_stripe_workload_name(source_count, aware=False)] = build_rack_stripe_random_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
+            workloads[_rack_stripe_workload_name(source_count, aware=True)] = build_rack_stripe_topology_aware_demands(
+                g,
+                cfg,
+                source_count=source_count,
+            )
     custom_profile = _custom_traffic_profile(g, cfg)
     if custom_profile is not None:
         workloads[str(custom_profile["name"])] = list(custom_profile["demands"])
@@ -235,6 +357,13 @@ def _evaluate_named_workloads_with_details(
             {str(demand.dst) for demand in demand_sequence},
             key=_node_sort_key,
         )
+        source_to_targets: dict[str, list[str]] = {}
+        for demand in demand_sequence:
+            source_to_targets.setdefault(str(demand.src), []).append(str(demand.dst))
+        detail["source_to_targets"] = {
+            source_id: sorted(set(target_ids), key=_node_sort_key)
+            for source_id, target_ids in sorted(source_to_targets.items(), key=lambda item: _node_sort_key(item[0]))
+        }
         workload_details[workload_name] = detail
     return workload_details
 
@@ -288,10 +417,26 @@ def _build_machine_metrics(
         workload_name: dict(detail["metrics"])
         for workload_name, detail in workload_details.items()
     }
+    zero_metrics = {
+        "completion_time_s": 0.0,
+        "completion_time_p50_s": 0.0,
+        "completion_time_p95_s": 0.0,
+        "per_ssu_throughput_gbps": 0.0,
+        "average_hops": 0.0,
+        "max_link_utilization": 0.0,
+        "link_utilization_cv": 0.0,
+    }
     return {
         **structural_metrics,
         **_prefix_workload_metrics("a2a", workload_metrics["A2A"]),
-        **_prefix_workload_metrics("sparse", workload_metrics["Sparse 1-to-N"]),
+        **_prefix_workload_metrics(
+            "replica_random",
+            workload_metrics.get(_REPLICA_RANDOM_WORKLOAD, zero_metrics),
+        ),
+        **_prefix_workload_metrics(
+            "replica_topology_aware",
+            workload_metrics.get(_REPLICA_TOPOLOGY_AWARE_WORKLOAD, zero_metrics),
+        ),
     }
 
 
@@ -308,14 +453,18 @@ def _selected_topologies(cfg: AnalysisConfig, topologies: list[str] | None) -> l
 
 def _hardware_assumptions() -> dict[str, Any]:
     return {
-        "exchange_node_unit": "8 SSU + 2 Union",
+        "exchange_node_unit": "8 SSU + 2 Union + 4 DPU + 8 NPU",
         "ssus_per_exchange_node": 8,
         "unions_per_exchange_node": 2,
+        "dpus_per_exchange_node": 4,
+        "npus_per_exchange_node": 8,
         "internal_ssu_union_link_gbps": 200.0,
+        "internal_dpu_union_link_gbps": 400.0,
+        "internal_npu_dpu_link_gbps": 400.0,
         "backend_link_gbps": 400.0,
         "union_total_ub_ports": 18,
         "union_ports_reserved_for_ssu": 8,
-        "union_ports_reserved_for_frontend_nics": 4,
+        "union_ports_reserved_for_dpu": 4,
         "backend_ports_available_per_union": 6,
     }
 
@@ -767,9 +916,19 @@ def _workload_configuration(cfg: AnalysisConfig) -> dict[str, Any]:
     payload = {
         "message_size_mb": cfg.message_size_mb,
         "a2a_scope": "all SSUs send to every other SSU",
-        "sparse_active_ratio": cfg.sparse_active_ratio,
-        "sparse_target_count": cfg.sparse_target_count,
+        "replica3_scope": "all SSUs send to two replica SSUs in two different exchange nodes",
     }
+    if cfg.enable_npu_write_workloads:
+        payload["npu_write_scope"] = (
+            "64 active logical NPUs inject through DPU -> 2 Union and compare local 1:1, single-target hotspot, and rack target-set writes"
+        )
+        payload["npu_write_source_counts"] = list(_validated_npu_write_source_counts(cfg))
+    if cfg.enable_rack_stripe_workloads:
+        payload["rack_stripe_scope"] = (
+            "each active source writes one logical object into 4 SSUs inside one target rack"
+        )
+        payload["rack_stripe_source_counts"] = list(_validated_rack_stripe_source_counts(cfg))
+        payload["rack_stripe_target_count"] = int(cfg.rack_stripe_target_count)
     if cfg.custom_traffic_file:
         payload["custom_traffic_file"] = cfg.custom_traffic_file
         payload["custom_traffic_name"] = cfg.custom_traffic_name
@@ -782,8 +941,6 @@ def _workload_description_payload(
     workload_details: dict[str, dict[str, Any]],
 ) -> list[dict[str, str]]:
     total_ssus = sum(1 for _, data in g.nodes(data=True) if data.get("node_role") == "ssu")
-    sparse_sources = len(workload_details["Sparse 1-to-N"].get("active_sources", []))
-    sparse_ratio_pct = cfg.sparse_active_ratio * 100.0
     component_ssu_counts = sorted(
         [
             sum(1 for node_id in component if g.nodes[node_id].get("node_role") == "ssu")
@@ -811,19 +968,113 @@ def _workload_description_payload(
                 else f"{total_ssus} SSUs each send {cfg.message_size_mb:.2f} MB to every other SSU."
             ),
         },
-        {
-            "title": display_workload_name("Sparse 1-to-N"),
-            "description": (
-                (
-                    f"{sparse_sources} active sources ({sparse_ratio_pct:.0f}%) each send "
-                    f"{cfg.message_size_mb:.2f} MB to {cfg.sparse_target_count} destinations inside their own component."
-                )
-                if component_count > 1
-                else f"{sparse_sources} active sources ({sparse_ratio_pct:.0f}%) each send "
-                f"{cfg.message_size_mb:.2f} MB to {cfg.sparse_target_count} destinations."
-            ),
-        },
     ]
+
+    if not cfg.enable_npu_write_workloads:
+        payload.extend(
+            [
+                {
+                    "title": display_workload_name(_REPLICA_RANDOM_WORKLOAD),
+                    "description": (
+                        f"{total_ssus} SSUs each send {cfg.message_size_mb:.2f} MB to two random replica SSUs; "
+                        "source and both replicas are always placed in three different exchange nodes."
+                    ),
+                },
+                {
+                    "title": display_workload_name(_REPLICA_TOPOLOGY_AWARE_WORKLOAD),
+                    "description": (
+                        "Deterministic topology-aware placement: Torus/FullMesh choose short-hop balanced neighbors, "
+                        "Clos uses balanced modular exchange offsets, and Dragon-Fly uses one local-group replica plus one direct global replica."
+                    ),
+                },
+            ]
+        )
+
+    if cfg.enable_npu_write_workloads:
+        for source_count in _validated_npu_write_source_counts(cfg):
+            payload.extend(
+                [
+                    {
+                        "title": _npu_local_1to1_workload_name(source_count, "Direct"),
+                        "description": (
+                            f"{source_count} logical NPUs each write one {cfg.message_size_mb:.2f} MB object "
+                            "to one SSU inside the same local exchange group; DPU traffic is split 50/50 to its two attached Union nodes."
+                        ),
+                    },
+                    {
+                        "title": _npu_local_1to1_workload_name(source_count, "Rack Pooling"),
+                        "description": (
+                            f"{source_count} logical NPUs still write the same local target SSU, but may enter through any Union in the same source rack."
+                        ),
+                    },
+                    {
+                        "title": _npu_local_1to1_workload_name(source_count, "Rack Sharding"),
+                        "description": (
+                            f"{source_count} logical NPUs split one fixed-size object across 4 target SSUs inside the same source rack."
+                        ),
+                    },
+                    {
+                        "title": _npu_single_ssu_hotspot_workload_name(source_count, "Direct"),
+                        "description": (
+                            f"{source_count} logical NPUs all write the same target SSU in rack 0 through their two source-side Union nodes only."
+                        ),
+                    },
+                    {
+                        "title": _npu_single_ssu_hotspot_workload_name(source_count, "Rack Pooling"),
+                        "description": (
+                            f"{source_count} logical NPUs still write the same hotspot SSU, but traffic may enter through any Union in the target rack."
+                        ),
+                    },
+                    {
+                        "title": _npu_single_ssu_hotspot_workload_name(source_count, "Rack Sharding"),
+                        "description": (
+                            f"{source_count} logical NPUs split one fixed-size object across 4 target SSUs in rack 0; "
+                            "each quarter still splits evenly across the two source-side Union nodes."
+                        ),
+                    },
+                    {
+                        "title": _npu_rack_target_set_workload_name(source_count, "Direct"),
+                        "description": (
+                            f"{source_count} logical NPUs are assigned one target SSU from a fixed 4-SSU rack-local target set, without rack pooling."
+                        ),
+                    },
+                    {
+                        "title": _npu_rack_target_set_workload_name(source_count, "Rack Pooling"),
+                        "description": (
+                            f"{source_count} logical NPUs keep the same single assigned rack-local target SSU, but may enter through any Union in the target rack."
+                        ),
+                    },
+                    {
+                        "title": _npu_rack_target_set_workload_name(source_count, "Rack Sharding"),
+                        "description": (
+                            f"{source_count} logical NPUs split one fixed-size object across the full 4-SSU rack-local target set."
+                        ),
+                    },
+                ]
+            )
+
+    if cfg.enable_rack_stripe_workloads:
+        rack_target_count = int(cfg.rack_stripe_target_count)
+        for source_count in _validated_rack_stripe_source_counts(cfg):
+            payload.extend(
+                [
+                    {
+                        "title": _rack_stripe_workload_name(source_count, aware=False),
+                        "description": (
+                            f"{source_count} active sources each stripe one {cfg.message_size_mb:.2f} MB logical write "
+                            f"across {rack_target_count} random SSUs inside one target rack; total write size per source stays fixed."
+                        ),
+                    },
+                    {
+                        "title": _rack_stripe_workload_name(source_count, aware=True),
+                        "description": (
+                            f"{source_count} active sources each stripe one {cfg.message_size_mb:.2f} MB logical write "
+                            f"across {rack_target_count} SSUs in different exchange groups of one target rack, "
+                            "so rack ingress is spread more evenly."
+                        ),
+                    },
+                ]
+            )
 
     custom_profile = _custom_traffic_profile(g, cfg)
     if custom_profile is not None:
@@ -876,6 +1127,178 @@ def _routing_mode_description_payload(name: str, cfg: AnalysisConfig) -> list[di
     ]
 
 
+def _displayed_workload_names(
+    cfg: AnalysisConfig,
+    workload_details: Mapping[str, dict[str, Any]],
+) -> list[str]:
+    if cfg.enable_npu_write_workloads:
+        names = ["A2A"]
+        for source_count in _validated_npu_write_source_counts(cfg):
+            names.extend(
+                [
+                    _npu_local_1to1_workload_name(source_count, "Direct"),
+                    _npu_local_1to1_workload_name(source_count, "Rack Pooling"),
+                    _npu_local_1to1_workload_name(source_count, "Rack Sharding"),
+                    _npu_single_ssu_hotspot_workload_name(source_count, "Direct"),
+                    _npu_single_ssu_hotspot_workload_name(source_count, "Rack Pooling"),
+                    _npu_single_ssu_hotspot_workload_name(source_count, "Rack Sharding"),
+                    _npu_rack_target_set_workload_name(source_count, "Direct"),
+                    _npu_rack_target_set_workload_name(source_count, "Rack Pooling"),
+                    _npu_rack_target_set_workload_name(source_count, "Rack Sharding"),
+                ]
+            )
+        return [name for name in names if name in workload_details]
+
+    names = ["A2A", _REPLICA_RANDOM_WORKLOAD, _REPLICA_TOPOLOGY_AWARE_WORKLOAD]
+    if cfg.enable_rack_stripe_workloads:
+        for source_count in _validated_rack_stripe_source_counts(cfg):
+            names.extend(
+                [
+                    _rack_stripe_workload_name(source_count, aware=False),
+                    _rack_stripe_workload_name(source_count, aware=True),
+                ]
+            )
+    custom_profile_name = cfg.custom_traffic_name if cfg.custom_traffic_file else None
+    if custom_profile_name and custom_profile_name in workload_details:
+        names.append(custom_profile_name)
+    return [name for name in names if name in workload_details]
+
+
+def _workload_metric_groups(
+    cfg: AnalysisConfig,
+    communication_metrics: Mapping[str, dict[str, float]],
+) -> list[dict[str, Any]]:
+    if cfg.enable_npu_write_workloads:
+        groups: list[dict[str, Any]] = []
+        if "A2A" in communication_metrics:
+            groups.append(
+                {
+                    "title": "A2A",
+                    "throughput_label": "Per SSU Throughput",
+                    "rows": [
+                        {
+                            "workload": "A2A",
+                            "display_name": display_workload_name("A2A"),
+                            **communication_metrics["A2A"],
+                        }
+                    ],
+                }
+            )
+        for source_count in _validated_npu_write_source_counts(cfg):
+            for title, names in [
+                (
+                    f"{int(source_count)} NPUs | Local 1:1",
+                    [
+                        _npu_local_1to1_workload_name(source_count, "Direct"),
+                        _npu_local_1to1_workload_name(source_count, "Rack Pooling"),
+                        _npu_local_1to1_workload_name(source_count, "Rack Sharding"),
+                    ],
+                ),
+                (
+                    f"{int(source_count)} NPUs | Single-SSU Hotspot",
+                    [
+                        _npu_single_ssu_hotspot_workload_name(source_count, "Direct"),
+                        _npu_single_ssu_hotspot_workload_name(source_count, "Rack Pooling"),
+                        _npu_single_ssu_hotspot_workload_name(source_count, "Rack Sharding"),
+                    ],
+                ),
+                (
+                    f"{int(source_count)} NPUs | Rack Target-Set 4",
+                    [
+                        _npu_rack_target_set_workload_name(source_count, "Direct"),
+                        _npu_rack_target_set_workload_name(source_count, "Rack Pooling"),
+                        _npu_rack_target_set_workload_name(source_count, "Rack Sharding"),
+                    ],
+                ),
+            ]:
+                rows = [
+                    {
+                        "workload": workload_name,
+                        "display_name": display_workload_name(workload_name),
+                        **communication_metrics[workload_name],
+                    }
+                    for workload_name in names
+                    if workload_name in communication_metrics
+                ]
+                if rows:
+                    groups.append(
+                        {
+                            "title": title,
+                            "throughput_label": "Per Active Source Throughput",
+                            "rows": rows,
+                        }
+                    )
+        return groups
+
+    return [
+        {
+            "title": "Workload Comparison",
+            "throughput_label": "Per SSU Throughput",
+            "rows": [
+                {
+                    "workload": workload_name,
+                    "display_name": display_workload_name(workload_name),
+                    **metrics,
+                }
+                for workload_name, metrics in communication_metrics.items()
+            ],
+        }
+    ]
+
+
+def _traffic_workload_groups(
+    cfg: AnalysisConfig,
+    traffic_workload_names: Sequence[str],
+) -> list[dict[str, Any]]:
+    if cfg.enable_npu_write_workloads:
+        groups: list[dict[str, Any]] = []
+        if "A2A" in traffic_workload_names:
+            groups.append({"title": "A2A", "columns": 1, "workloads": ["A2A"]})
+        for source_count in _validated_npu_write_source_counts(cfg):
+            group_specs = [
+                (
+                    f"{int(source_count)} NPUs | Local 1:1",
+                    3,
+                    [
+                        _npu_local_1to1_workload_name(source_count, "Direct"),
+                        _npu_local_1to1_workload_name(source_count, "Rack Pooling"),
+                        _npu_local_1to1_workload_name(source_count, "Rack Sharding"),
+                    ],
+                ),
+                (
+                    f"{int(source_count)} NPUs | Single-SSU Hotspot",
+                    3,
+                    [
+                        _npu_single_ssu_hotspot_workload_name(source_count, "Direct"),
+                        _npu_single_ssu_hotspot_workload_name(source_count, "Rack Pooling"),
+                        _npu_single_ssu_hotspot_workload_name(source_count, "Rack Sharding"),
+                    ],
+                ),
+                (
+                    f"{int(source_count)} NPUs | Rack Target-Set 4",
+                    3,
+                    [
+                        _npu_rack_target_set_workload_name(source_count, "Direct"),
+                        _npu_rack_target_set_workload_name(source_count, "Rack Pooling"),
+                        _npu_rack_target_set_workload_name(source_count, "Rack Sharding"),
+                    ],
+                ),
+            ]
+            for title, columns, names in group_specs:
+                workloads = [name for name in names if name in traffic_workload_names]
+                if workloads:
+                    groups.append(
+                        {
+                            "title": title,
+                            "columns": columns,
+                            "workloads": workloads,
+                        }
+                    )
+        return groups
+
+    return [{"title": "Traffic Views", "columns": 2, "workloads": list(traffic_workload_names)}]
+
+
 def _comparison_modes_for_topology(name: str) -> list[str]:
     if _is_clos_name(name):
         return ["ECMP"]
@@ -905,11 +1328,14 @@ def _comparison_metric_subset(metrics: dict[str, float]) -> dict[str, float]:
 
 
 def _routing_comparison_payload(name: str, g: nx.Graph, cfg: AnalysisConfig) -> dict[str, Any] | None:
-    if _is_clos_name(name) or _is_df_name(name):
+    if cfg.enable_npu_write_workloads or _is_clos_name(name) or _is_df_name(name):
         return None
 
     demands = _workload_demands(g, cfg)
-    workload_names = list(demands.keys())
+    workload_names = _displayed_workload_names(
+        cfg,
+        {workload_name: {} for workload_name in demands.keys()},
+    )
     per_mode_results = {
         mode: _evaluate_named_workloads(g, cfg, mode, demands)
         for mode in _comparison_modes_for_topology(name)
@@ -931,8 +1357,14 @@ def _routing_comparison_payload(name: str, g: nx.Graph, cfg: AnalysisConfig) -> 
             }
         )
 
+    columns = [dict(column) for column in _COMPARISON_COLUMNS]
+    if cfg.enable_npu_write_workloads:
+        for column in columns:
+            if column["key"] == "per_ssu_throughput_gbps":
+                column["label"] = "Per Active Source Throughput"
+
     return {
-        "columns": list(_COMPARISON_COLUMNS),
+        "columns": columns,
         "sections": sections,
     }
 
@@ -942,33 +1374,48 @@ def _default_routing_highlight(
     cfg: AnalysisConfig,
     comparison_payload: dict[str, Any] | None,
     active_a2a_metrics: dict[str, float],
-    active_sparse_metrics: dict[str, float],
+    active_replica_metrics: dict[str, float],
 ) -> dict[str, Any]:
     default_mode = _default_highlight_mode(name)
+    if cfg.enable_npu_write_workloads:
+        return {
+            "mode": default_mode,
+            "label": f"{default_mode} Throughput",
+            "a2a_per_ssu_throughput_gbps": active_a2a_metrics["per_ssu_throughput_gbps"],
+            "replica_topology_aware_per_ssu_throughput_gbps": 0.0,
+        }
     if comparison_payload is not None:
         by_workload = {section["workload"]: section for section in comparison_payload["sections"]}
         a2a_row = next(row for row in by_workload["A2A"]["rows"] if row["mode"] == default_mode)
-        sparse_row = next(row for row in by_workload["Sparse 1-to-N"]["rows"] if row["mode"] == default_mode)
+        replica_row = next(
+            row
+            for row in by_workload[_REPLICA_TOPOLOGY_AWARE_WORKLOAD]["rows"]
+            if row["mode"] == default_mode
+        )
         return {
             "mode": default_mode,
             "label": f"{default_mode} Throughput",
             "a2a_per_ssu_throughput_gbps": a2a_row["per_ssu_throughput_gbps"],
-            "sparse_per_ssu_throughput_gbps": sparse_row["per_ssu_throughput_gbps"],
+            "replica_topology_aware_per_ssu_throughput_gbps": replica_row["per_ssu_throughput_gbps"],
         }
 
     return {
         "mode": default_mode,
         "label": f"{default_mode} Throughput",
         "a2a_per_ssu_throughput_gbps": active_a2a_metrics["per_ssu_throughput_gbps"],
-        "sparse_per_ssu_throughput_gbps": active_sparse_metrics["per_ssu_throughput_gbps"],
+        "replica_topology_aware_per_ssu_throughput_gbps": active_replica_metrics["per_ssu_throughput_gbps"],
     }
 
 
 def _build_observations(
     structural_metrics: dict[str, float],
     a2a_metrics: dict[str, float],
-    sparse_metrics: dict[str, float],
+    replica_random_metrics: dict[str, float],
+    replica_topology_aware_metrics: dict[str, float],
 ) -> list[str]:
+    random_tp = replica_random_metrics["per_ssu_throughput_gbps"]
+    aware_tp = replica_topology_aware_metrics["per_ssu_throughput_gbps"]
+    uplift = ((aware_tp / random_tp) - 1.0) * 100.0 if random_tp > 0 else 0.0
     return [
         (
             "A2A per-SSU throughput reaches "
@@ -976,9 +1423,9 @@ def _build_observations(
             f"{a2a_metrics['max_link_utilization']:.2%}."
         ),
         (
-            f"{display_workload_name('Sparse 1-to-N')} communication completes in "
-            f"{sparse_metrics['completion_time_p95_s'] * 1e3:.2f} ms at p95 with link-utilization CV "
-            f"{sparse_metrics['link_utilization_cv']:.3f}."
+            f"{display_workload_name(_REPLICA_TOPOLOGY_AWARE_WORKLOAD)} reaches "
+            f"{aware_tp:.2f} Gbps per SSU, {uplift:+.1f}% versus random placement, "
+            f"with link-utilization CV {replica_topology_aware_metrics['link_utilization_cv']:.3f}."
         ),
         (
             "Structural span is diameter "
@@ -1002,16 +1449,24 @@ def _build_render_result(
         "bisection_bandwidth_gbps_per_ssu": machine_metrics["bisection_bandwidth_gbps_per_ssu"],
     }
     a2a_metrics = _workload_group("a2a", machine_metrics)
-    sparse_metrics = _workload_group("sparse", machine_metrics)
+    replica_random_metrics = _workload_group("replica_random", machine_metrics)
+    replica_topology_aware_metrics = _workload_group("replica_topology_aware", machine_metrics)
     routing_comparison = _routing_comparison_payload(name, g, cfg)
+    displayed_workload_names = _displayed_workload_names(cfg, workload_details)
     communication_metrics = {
         "A2A": a2a_metrics,
-        "Sparse 1-to-N": sparse_metrics,
+        _REPLICA_RANDOM_WORKLOAD: replica_random_metrics,
+        _REPLICA_TOPOLOGY_AWARE_WORKLOAD: replica_topology_aware_metrics,
     }
     for workload_name, detail in workload_details.items():
         if workload_name in communication_metrics:
             continue
         communication_metrics[workload_name] = dict(detail["metrics"])
+    communication_metrics = {
+        workload_name: communication_metrics[workload_name]
+        for workload_name in displayed_workload_names
+        if workload_name in communication_metrics
+    }
     workload_metric_rows = [
         {
             "workload": workload_name,
@@ -1020,6 +1475,8 @@ def _build_render_result(
         }
         for workload_name, metrics in communication_metrics.items()
     ]
+    workload_metric_groups = _workload_metric_groups(cfg, communication_metrics)
+    traffic_workload_names = list(communication_metrics.keys())
 
     return {
         "name": name,
@@ -1035,17 +1492,26 @@ def _build_render_result(
         "structural_metrics": structural_metrics,
         "communication_metrics": communication_metrics,
         "workload_metric_rows": workload_metric_rows,
-        "traffic_workload_names": list(communication_metrics.keys()),
+        "workload_metric_groups": workload_metric_groups,
+        "traffic_workload_names": traffic_workload_names,
+        "traffic_workload_groups": _traffic_workload_groups(cfg, traffic_workload_names),
         "traffic_details": workload_details,
+        "show_replica_panels": not cfg.enable_npu_write_workloads,
+        "show_npu_write_layout": cfg.enable_npu_write_workloads,
         "default_routing_highlight": _default_routing_highlight(
             name,
             cfg,
             routing_comparison,
             a2a_metrics,
-            sparse_metrics,
+            replica_topology_aware_metrics,
         ),
         "routing_comparison": routing_comparison,
-        "observations": _build_observations(structural_metrics, a2a_metrics, sparse_metrics),
+        "observations": _build_observations(
+            structural_metrics,
+            a2a_metrics,
+            replica_random_metrics,
+            replica_topology_aware_metrics,
+        ),
     }
 
 

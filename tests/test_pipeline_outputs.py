@@ -24,13 +24,20 @@ EXPECTED_SUMMARY_HEADERS = [
     "a2a_average_hops",
     "a2a_max_link_utilization",
     "a2a_link_utilization_cv",
-    "sparse_completion_time_s",
-    "sparse_completion_time_p50_s",
-    "sparse_completion_time_p95_s",
-    "sparse_per_ssu_throughput_gbps",
-    "sparse_average_hops",
-    "sparse_max_link_utilization",
-    "sparse_link_utilization_cv",
+    "replica_random_completion_time_s",
+    "replica_random_completion_time_p50_s",
+    "replica_random_completion_time_p95_s",
+    "replica_random_per_ssu_throughput_gbps",
+    "replica_random_average_hops",
+    "replica_random_max_link_utilization",
+    "replica_random_link_utilization_cv",
+    "replica_topology_aware_completion_time_s",
+    "replica_topology_aware_completion_time_p50_s",
+    "replica_topology_aware_completion_time_p95_s",
+    "replica_topology_aware_per_ssu_throughput_gbps",
+    "replica_topology_aware_average_hops",
+    "replica_topology_aware_max_link_utilization",
+    "replica_topology_aware_link_utilization_cv",
 ]
 
 EXPECTED_HOP_VOLUME_HEADERS = [
@@ -93,8 +100,16 @@ def test_pipeline_writes_hop_and_link_volume_distribution_csvs(output_dir: Path)
 
     assert len(hop_rows) > 0
     assert len(link_rows) > 0
-    assert {row["workload"] for row in hop_rows} == {"A2A", "Sparse 1-to-N"}
-    assert {row["workload"] for row in link_rows} == {"A2A", "Sparse 1-to-N"}
+    assert {row["workload"] for row in hop_rows} == {
+        "A2A",
+        "Replica-3 Random",
+        "Replica-3 Topology-Aware",
+    }
+    assert {row["workload"] for row in link_rows} == {
+        "A2A",
+        "Replica-3 Random",
+        "Replica-3 Topology-Aware",
+    }
 
 
 def test_pipeline_includes_custom_traffic_workload_in_dashboard(output_dir: Path):
@@ -120,6 +135,53 @@ def test_pipeline_includes_custom_traffic_workload_in_dashboard(output_dir: Path
     with paths["hop_volume_csv"].open("r", encoding="utf-8", newline="") as handle:
         hop_rows = list(csv.DictReader(handle))
     assert "Custom M-to-N" in {row["workload"] for row in hop_rows}
+
+
+def test_pipeline_renders_rack_stripe_workloads_and_comparison_tables(output_dir: Path):
+    cfg = AnalysisConfig(
+        output_dir=output_dir,
+        enable_rack_stripe_workloads=True,
+        rack_stripe_source_counts=(8, 64),
+        rack_stripe_target_count=4,
+        routing_mode="SHORTEST_PATH",
+    )
+    paths = run_full_analysis(cfg, ["2D-Torus", "3D-Torus"])
+
+    html = paths["html"].read_text(encoding="utf-8")
+    assert "Rack-Stripe-4 Random (8 src)" in html
+    assert "Rack-Stripe-4 Aware (8 src)" in html
+    assert "Rack-Stripe-4 Random (64 src)" in html
+    assert "Rack-Stripe-4 Aware (64 src)" in html
+    assert "Rack-Stripe-4 Random (8 src) Comparison" in html
+    assert "Rack-Stripe-4 Aware (64 src) Comparison" in html
+    assert "source_targets" in html
+
+
+def test_pipeline_renders_npu_write_dashboard_without_replica_panels(output_dir: Path):
+    cfg = AnalysisConfig(
+        output_dir=output_dir,
+        enable_npu_write_workloads=True,
+        npu_write_source_counts=(64,),
+        routing_mode="SHORTEST_PATH",
+    )
+    paths = run_full_analysis(cfg, ["2D-FullMesh", "2D-Torus"])
+
+    html = paths["html"].read_text(encoding="utf-8")
+    assert "64 NPUs | Local 1:1 | Direct" in html
+    assert "64 NPUs | Local 1:1 | Rack Pooling" in html
+    assert "64 NPUs | Local 1:1 | Rack Sharding" in html
+    assert "64 NPUs | Single-SSU Hotspot | Direct" in html
+    assert "64 NPUs | Single-SSU Hotspot | Rack Pooling" in html
+    assert "64 NPUs | Single-SSU Hotspot | Rack Sharding" in html
+    assert "64 NPUs | Rack Target-Set 4 | Direct" in html
+    assert "64 NPUs | Rack Target-Set 4 | Rack Pooling" in html
+    assert "64 NPUs | Rack Target-Set 4 | Rack Sharding" in html
+    assert "3-Replica Random Comparison" not in html
+    assert "3-Replica Topology-Aware Comparison" not in html
+    assert "Per Active Source Throughput" in html
+    assert "Routing Modes" not in html
+    assert "Routing Comparison" not in html
+    assert "Traffic Models" not in html
 
 
 def test_pipeline_writes_routing_and_workload_config(output_dir: Path):
@@ -149,11 +211,13 @@ def test_dashboard_outputs_use_new_labels_without_pdf(output_dir: Path):
 
     html = paths["html"].read_text(encoding="utf-8")
     assert "Bisection BW / SSU" in html
-    assert "Sparse M-to-N" in html
+    assert "3-Replica Random" in html
+    assert "3-Replica Topology-Aware" in html
     assert "Workload Setup" in html
     assert "Routing Comparison" in html
     assert "A2A Directional Traffic" in html
-    assert "Sparse M-to-N Directional Traffic" in html
+    assert "3-Replica Random Directional Traffic" in html
+    assert "3-Replica Topology-Aware Directional Traffic" in html
     assert "Topology Switcher" in html
     assert "All Topology Comparison" in html
     assert "All Topologies" in html
@@ -182,13 +246,33 @@ def test_dashboard_outputs_use_new_labels_without_pdf(output_dir: Path):
     assert not (output_dir / "topology_report.pdf").exists()
 
 
+def test_dashboard_includes_replica_click_interaction_and_random_comparison_columns(output_dir: Path):
+    cfg = AnalysisConfig(output_dir=output_dir, routing_mode="SHORTEST_PATH")
+    paths = run_full_analysis(cfg, ["Clos", "2D-Torus"])
+
+    html = paths["html"].read_text(encoding="utf-8")
+    assert "3-Replica Random Comparison" in html
+    assert "3-Replica Topology-Aware Comparison" in html
+    assert "activeReplicaSourceId" in html
+    assert "source_targets" in html
+    assert "inactive_node_color" in html
+    assert "Random Completion" in html
+    assert "Random Hops" in html
+    assert "Random Max Util" in html
+    assert "Random CV" in html
+    assert "Aware Completion" in html
+    assert "Aware Hops" in html
+    assert "Aware Max Util" in html
+    assert "Aware CV" in html
+
+
 def test_pipeline_renders_sparsemesh_dashboard_sections(output_dir: Path):
     cfg = AnalysisConfig(output_dir=output_dir, routing_mode="SHORTEST_PATH")
     paths = run_full_analysis(cfg, ["SparseMesh-Local"])
 
     html = paths["html"].read_text(encoding="utf-8")
     assert "SparseMesh S=5;N=2" in html
-    assert "Sparse M-to-N Directional Traffic" in html
+    assert "3-Replica Topology-Aware Directional Traffic" in html
     assert "SHORTEST_PATH" in html
     assert "FULL_PATH" in html
 
@@ -270,7 +354,8 @@ def test_direct_topology_outputs_compact_routing_comparison_sections(output_dir:
 
     html = paths["html"].read_text(encoding="utf-8")
     assert "A2A Routing Comparison" in html
-    assert "Sparse M-to-N Routing Comparison" in html
+    assert "3-Replica Random Routing Comparison" in html
+    assert "3-Replica Topology-Aware Routing Comparison" in html
     assert "Per SSU Throughput" in html
     assert "Completion Time" in html
     assert "P95 Completion" in html
@@ -290,7 +375,7 @@ def test_clos_outputs_only_ecmp_without_direct_routing_comparison_sections(outpu
 
     html = paths["html"].read_text(encoding="utf-8")
     assert "A2A Routing Comparison" not in html
-    assert "Sparse M-to-N Routing Comparison" not in html
+    assert "3-Replica Topology-Aware Routing Comparison" not in html
     assert "Workload Setup" in html
     assert "Routing Modes" in html
     assert "ECMP" in html
@@ -302,7 +387,7 @@ def test_df_outputs_single_mode_summary_without_direct_routing_comparison_sectio
     html = paths["html"].read_text(encoding="utf-8")
     assert "Dragon-Fly" in html
     assert "A2A Routing Comparison" not in html
-    assert "Sparse M-to-N Routing Comparison" not in html
+    assert "3-Replica Topology-Aware Routing Comparison" not in html
     assert "Workload Setup" in html
     assert "Routing Modes" in html
     assert "SHORTEST_PATH" in html

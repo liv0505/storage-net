@@ -55,6 +55,28 @@ def test_2d_fullmesh_builds_exchange_nodes_with_expected_parts():
     assert len(union_nodes) == 16 * 2
 
 
+def test_exchange_node_builds_expected_dpu_and_npu_inventory():
+    g = build_topology("2D-FullMesh", AnalysisConfig())
+
+    dpu_nodes = [n for n, d in g.nodes(data=True) if d["node_role"] == "dpu"]
+    npu_nodes = [n for n, d in g.nodes(data=True) if d["node_role"] == "npu"]
+    dpu_union_links = [
+        data
+        for _, _, data in g.edges(data=True)
+        if data.get("link_kind") == "internal_dpu_downlink"
+    ]
+    npu_dpu_links = [
+        data
+        for _, _, data in g.edges(data=True)
+        if data.get("link_kind") == "internal_npu_uplink"
+    ]
+
+    assert len(dpu_nodes) == 16 * 4
+    assert len(npu_nodes) == 16 * 8
+    assert len(dpu_union_links) == 16 * 8
+    assert len(npu_dpu_links) == 16 * 8
+
+
 def test_2d_fullmesh_has_expected_backend_structure():
     g = build_topology("2D-FullMesh", AnalysisConfig())
     backend = [

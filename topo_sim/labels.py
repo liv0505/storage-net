@@ -4,6 +4,8 @@ from __future__ import annotations
 _WORKLOAD_DISPLAY_NAMES = {
     "A2A": "A2A",
     "Sparse 1-to-N": "Sparse M-to-N",
+    "Replica-3 Random": "3-Replica Random",
+    "Replica-3 Topology-Aware": "3-Replica Topology-Aware",
 }
 
 _TOPOLOGY_DISPLAY_NAMES = {

@@ -30,6 +30,7 @@ _TRAFFIC_IDLE_SSU_COLOR = "#667085"
 _TRAFFIC_SOURCE_COLOR = "#7dd3fc"
 _TRAFFIC_DESTINATION_COLOR = "#22c55e"
 _TRAFFIC_DESTINATION_RING_COLOR = "#facc15"
+_TRAFFIC_INACTIVE_NODE_COLOR = "#667085"
 _PLOT_BG_COLOR = "#000000"
 
 
@@ -68,6 +69,7 @@ def _exchange_local_positions(base_x: float, base_y: float, exchange_node_id: st
     positions: dict[str, tuple[float, float]] = {}
     ssu_spacing = 0.62
     union_spacing = 1.2
+    dpu_spacing = 1.32
 
     for ssu_index in range(8):
         positions[f"{exchange_node_id}:ssu{ssu_index}"] = (base_x + (ssu_index * ssu_spacing), base_y)
@@ -75,6 +77,11 @@ def _exchange_local_positions(base_x: float, base_y: float, exchange_node_id: st
     union_center = base_x + 3.5 * ssu_spacing
     positions[f"{exchange_node_id}:union0"] = (union_center - (union_spacing / 2.0), base_y + 1.15)
     positions[f"{exchange_node_id}:union1"] = (union_center + (union_spacing / 2.0), base_y + 1.15)
+    for dpu_index in range(4):
+        positions[f"{exchange_node_id}:dpu{dpu_index}"] = (
+            union_center + ((dpu_index - 1.5) * dpu_spacing),
+            base_y + 2.36,
+        )
     return positions
 
 
@@ -82,6 +89,7 @@ def _torus_exchange_local_positions(base_x: float, base_y: float, exchange_node_
     positions: dict[str, tuple[float, float]] = {}
     ssu_spacing = 0.62
     union_spacing = 1.36
+    dpu_spacing = 1.26
 
     for ssu_index in range(8):
         positions[f"{exchange_node_id}:ssu{ssu_index}"] = (base_x + (ssu_index * ssu_spacing), base_y)
@@ -95,6 +103,11 @@ def _torus_exchange_local_positions(base_x: float, base_y: float, exchange_node_
         union_center + (union_spacing / 2.0) + 0.12,
         base_y + 1.34,
     )
+    for dpu_index in range(4):
+        positions[f"{exchange_node_id}:dpu{dpu_index}"] = (
+            union_center + ((dpu_index - 1.5) * dpu_spacing),
+            base_y + 2.46,
+        )
     return positions
 
 
@@ -109,6 +122,7 @@ def _oriented_exchange_local_positions(
     positions: dict[str, tuple[float, float]] = {}
     ssu_spacing = 0.62
     union_spacing = 1.2
+    dpu_spacing = 1.28
 
     tangent_x, tangent_y = tangent
     inward_x, inward_y = inward
@@ -129,6 +143,8 @@ def _oriented_exchange_local_positions(
     else:
         positions[f"{exchange_node_id}:union0"] = _project(-(union_spacing / 2.0), 1.15)
         positions[f"{exchange_node_id}:union1"] = _project(union_spacing / 2.0, 1.15)
+    for dpu_index in range(4):
+        positions[f"{exchange_node_id}:dpu{dpu_index}"] = _project((dpu_index - 1.5) * dpu_spacing, 2.34)
     return positions
 
 
@@ -141,6 +157,7 @@ def _oriented_df_exchange_local_positions(
 ) -> dict[str, tuple[float, float]]:
     positions: dict[str, tuple[float, float]] = {}
     ssu_spacing = 0.62
+    dpu_spacing = 1.18
     tangent_x, tangent_y = tangent
     inward_x, inward_y = inward
 
@@ -158,6 +175,8 @@ def _oriented_df_exchange_local_positions(
     # Render them on two staggered inner rings so the front and rear DF circles stay visible.
     positions[f"{exchange_node_id}:union0"] = _project(-0.28, 1.08)
     positions[f"{exchange_node_id}:union1"] = _project(0.28, 1.86)
+    for dpu_index in range(4):
+        positions[f"{exchange_node_id}:dpu{dpu_index}"] = _project((dpu_index - 1.5) * dpu_spacing, 2.82)
     return positions
 
 
@@ -233,33 +252,72 @@ def _exchange_grid_positions_3d() -> dict[str, tuple[float, float]]:
     return positions
 
 
+def _torus_exchange_base_x_from_center(center_x: float) -> float:
+    return center_x - (3.5 * 0.62)
+
+
+def _cube_axis_projection_value(
+    axis_value: int,
+    axis_size: int,
+    normalized_half_span: float,
+) -> float:
+    if axis_size <= 1:
+        return 0.0
+    center = (axis_size - 1) / 2.0
+    scale = normalized_half_span / max((axis_size - 1) / 2.0, 1e-9)
+    return (float(axis_value) - center) * scale
+
+
+def _project_3d_torus_coord(
+    coord: tuple[int, int, int],
+    shape: tuple[int, int, int],
+) -> tuple[float, float]:
+    max_axis_span = max(max(int(axis_size) - 1, 0) for axis_size in shape)
+    normalized_half_span = max(float(max_axis_span) / 2.0, 1.0)
+
+    x_value = _cube_axis_projection_value(int(coord[0]), int(shape[0]), normalized_half_span)
+    y_value = _cube_axis_projection_value(int(coord[1]), int(shape[1]), normalized_half_span)
+    z_value = _cube_axis_projection_value(int(coord[2]), int(shape[2]), normalized_half_span)
+
+    # Project the exchange lattice as a cube-like wireframe:
+    # y-axis is horizontal, x-axis is vertical, z-axis is the depth diagonal.
+    basis_x = (0.0, -5.2)
+    basis_y = (8.0, 0.0)
+    basis_z = (4.8, -3.6)
+
+    projected_x = (x_value * basis_x[0]) + (y_value * basis_y[0]) + (z_value * basis_z[0])
+    projected_y = (x_value * basis_x[1]) + (y_value * basis_y[1]) + (z_value * basis_z[1])
+    return projected_x, projected_y
+
+
 def _exchange_grid_positions_3d_torus(g: nx.Graph) -> dict[str, tuple[float, float]]:
     positions: dict[str, tuple[float, float]] = {}
     exchange_coords = _torus_exchange_coords(g)
     if not exchange_coords:
+        fallback_shape = (4, 4, 4)
         exchange_coords = {
             f"en{(x * 16) + (y * 4) + z}": (x, y, z)
-            for x in range(4)
-            for y in range(4)
-            for z in range(4)
+            for x in range(fallback_shape[0])
+            for y in range(fallback_shape[1])
+            for z in range(fallback_shape[2])
         }
-    cell_x = 6.6
-    cell_y = 3.7
-    block_gap_x = 31.0
-    block_gap_y = 18.0
 
-    z_levels = sorted({coord[2] for coord in exchange_coords.values()})
-    z_index_map = {z_level: index for index, z_level in enumerate(z_levels)}
-    blocks_per_row = 2 if len(z_levels) > 1 else 1
+    shape = tuple(int(value) for value in g.graph.get("torus_exchange_grid_shape", (4, 4, 4)))
+    if len(shape) != 3:
+        shape = (4, 4, 4)
 
     for exchange_id, coord in sorted(exchange_coords.items(), key=lambda item: int(item[0].removeprefix("en"))):
-        x, y, z = coord
-        z_index = z_index_map[z]
-        block_col = z_index % blocks_per_row
-        block_row = z_index // blocks_per_row
-        base_x = (block_col * block_gap_x) + (y * cell_x)
-        base_y = -(block_row * block_gap_y) - (x * cell_y)
-        positions.update(_torus_exchange_local_positions(base_x, base_y, exchange_id))
+        center_x, center_y = _project_3d_torus_coord(
+            (int(coord[0]), int(coord[1]), int(coord[2])),
+            (int(shape[0]), int(shape[1]), int(shape[2])),
+        )
+        positions.update(
+            _torus_exchange_local_positions(
+                _torus_exchange_base_x_from_center(center_x),
+                center_y,
+                exchange_id,
+            )
+        )
 
     return positions
 
@@ -487,6 +545,8 @@ def _node_color(node_data: dict[str, Any]) -> str:
         return _SSU_NODE_COLOR
     if role == "union":
         return _UNION_NODE_COLOR
+    if role == "dpu":
+        return "#f59e0b"
     if role == "clos_spine":
         return _SPINE_NODE_COLOR
     if role == "clos_leaf":
@@ -672,7 +732,7 @@ def _edge_path_points(
     v: str,
     edge_data: dict[str, Any],
     *,
-    point_count: int = 5,
+    point_count: int = 13,
     curve_bias: float = 0.0,
 ) -> list[tuple[float, float]]:
     x0, y0 = pos[u]
@@ -730,7 +790,7 @@ def _parallel_edge_paths(
     v: str,
     edge_data: dict[str, Any],
     *,
-    point_count: int = 5,
+    point_count: int = 13,
 ) -> list[list[tuple[float, float]]]:
     return [
         _edge_path_points(
@@ -778,6 +838,8 @@ def _trace_from_edges(
 
     for u, v, data in g.edges(data=True):
         if data.get("link_kind") != link_kind:
+            continue
+        if str(u) not in pos or str(v) not in pos:
             continue
         for points in _parallel_edge_paths(g, pos, topology_name, str(u), str(v), data):
             segments.append((_edge_draw_rank(g, topology_name, str(u), str(v)), points))
@@ -832,6 +894,8 @@ def _build_interaction_payload(
         edge_segments: list[dict[str, list[float | None]]] = []
         label_items: list[dict[str, Any]] = []
         for neighbor in g.neighbors(node_id):
+            if str(neighbor) not in pos:
+                continue
             edge_data = g.get_edge_data(node_id, neighbor) or {}
             bandwidth = float(edge_data.get("bandwidth_gbps", 0.0))
             parallel_links = max(1, int(edge_data.get("parallel_links", 1)))
@@ -868,7 +932,7 @@ def _build_interaction_payload(
 def _layout_notes(topology_name: str) -> list[str]:
     base_note = "SSUs stay on the bottom row and Unions sit on the layer above inside each exchange node."
     if _torus_family_name(topology_name) == "3D-Torus":
-        return [base_note, "Exchange nodes are grouped into paired z-layers, each rendered as one 4x4 plane block."]
+        return [base_note, "Exchange nodes are projected as a cube-style 3D lattice so the x/y/z torus structure reads as one spatial volume."]
     if _is_clos_name(topology_name) and not _is_clos_4p_leaf_name(topology_name):
         return [base_note, "Clos spine layer sits above the exchange-node Union layer for structured two-level viewing."]
     if topology_name == "Clos-4P-FullMesh":
@@ -936,12 +1000,47 @@ def _sparse_focus_traces(
                     line=dict(width=1.8, color=border_color),
                 ),
                 text=node_ids,
+                customdata=node_ids,
                 hovertemplate=f"{label}: %{{text}}<extra></extra>",
                 showlegend=True,
                 name=label,
             )
         )
     return traces
+
+
+def _traffic_interaction_payload(
+    g: nx.Graph,
+    pos: dict[Any, tuple[float, float]],
+    node_ids: list[str],
+    traffic_details: dict[str, Any],
+    *,
+    base_node_opacities: list[float] | None = None,
+    base_node_colors: list[str] | None = None,
+) -> dict[str, Any]:
+    node_points: dict[str, Any] = {}
+    for node_id in node_ids:
+        x, y = pos[node_id]
+        node_points[node_id] = {
+            "x": x,
+            "y": y,
+            "label": node_id,
+            "node_role": str(g.nodes[node_id].get("node_role", "unknown")),
+        }
+
+    source_targets = {
+        str(source_id): [str(target_id) for target_id in target_ids if str(target_id) in node_points]
+        for source_id, target_ids in traffic_details.get("source_to_targets", {}).items()
+        if str(source_id) in node_points
+    }
+    return {
+        "node_points": node_points,
+        "source_targets": source_targets,
+        "base_node_opacities": list(base_node_opacities or ([1.0] * len(node_ids))),
+        "base_node_colors": list(base_node_colors or ([_DEFAULT_NODE_COLOR] * len(node_ids))),
+        "baseNodeIds": list(node_ids),
+        "inactive_node_color": _TRAFFIC_INACTIVE_NODE_COLOR,
+    }
 
 
 def _interaction_script(plot_id: str, payload: dict[str, Any]) -> str:
@@ -1021,14 +1120,116 @@ def _interaction_script(plot_id: str, payload: dict[str, Any]) -> str:
 """
 
 
+def _traffic_interaction_script(
+    plot_id: str,
+    payload: dict[str, Any],
+    *,
+    base_node_trace_index: int,
+    focus_trace_indices: list[int],
+    source_trace_index: int,
+    target_trace_index: int,
+    label_trace_index: int,
+) -> str:
+    interaction_json = json.dumps(payload, separators=(",", ":"))
+    focus_trace_indices_json = json.dumps([int(index) for index in focus_trace_indices], separators=(",", ":"))
+    return f"""
+(function() {{
+  const plotId = {json.dumps(plot_id)};
+  const interaction = {interaction_json};
+  const baseNodeTraceIndex = {int(base_node_trace_index)};
+  const focusTraceIndices = {focus_trace_indices_json};
+  const sourceTraceIndex = {int(source_trace_index)};
+  const targetTraceIndex = {int(target_trace_index)};
+  const labelTraceIndex = {int(label_trace_index)};
+  const plot = document.getElementById(plotId);
+  if (!plot) return;
+
+  function clearSelection() {{
+    const defaultOpacity = interaction.base_node_opacities || interaction.baseNodeIds.map(() => 1);
+    const defaultColors = interaction.base_node_colors || interaction.baseNodeIds.map(() => interaction.inactive_node_color || '#667085');
+    Plotly.restyle(plot, {{'marker.color': [defaultColors]}}, [baseNodeTraceIndex]);
+    Plotly.restyle(plot, {{'marker.opacity': [defaultOpacity]}}, [baseNodeTraceIndex]);
+    if (focusTraceIndices.length) {{
+      Plotly.restyle(plot, {{opacity: 1}}, focusTraceIndices);
+    }}
+    Plotly.restyle(plot, {{x: [[]], y: [[]], text: [[]], customdata: [[]]}}, [sourceTraceIndex, targetTraceIndex]);
+    Plotly.restyle(plot, {{x: [[]], y: [[]], text: [[]]}}, [labelTraceIndex]);
+    plot.dataset.activeReplicaSourceId = '';
+  }}
+
+  function highlightSource(nodeId) {{
+    const targetIds = interaction.source_targets[nodeId] || [];
+    if (!targetIds.length) {{
+      clearSelection();
+      return;
+    }}
+
+    const activeIds = [nodeId].concat(targetIds);
+    const defaultOpacity = interaction.base_node_opacities || interaction.baseNodeIds.map(() => 1);
+    const defaultColors = interaction.base_node_colors || interaction.baseNodeIds.map(() => interaction.inactive_node_color || '#667085');
+    const inactiveColor = interaction.inactive_node_color || '#667085';
+    const nodeOpacity = interaction.baseNodeIds.map((id, index) =>
+      activeIds.includes(id) ? defaultOpacity[index] : Math.max(0.22, defaultOpacity[index] * 0.72)
+    );
+    const nodeColors = interaction.baseNodeIds.map((id, index) =>
+      activeIds.includes(id) ? defaultColors[index] : inactiveColor
+    );
+    Plotly.restyle(plot, {{'marker.color': [nodeColors]}}, [baseNodeTraceIndex]);
+    Plotly.restyle(plot, {{'marker.opacity': [nodeOpacity]}}, [baseNodeTraceIndex]);
+    if (focusTraceIndices.length) {{
+      Plotly.restyle(plot, {{opacity: 0}}, focusTraceIndices);
+    }}
+
+    const sourcePoint = interaction.node_points[nodeId];
+    const targetPoints = targetIds.map((id) => interaction.node_points[id]).filter(Boolean);
+    Plotly.restyle(plot, {{
+      x: [[sourcePoint.x]],
+      y: [[sourcePoint.y]],
+      text: [[sourcePoint.label]],
+      customdata: [[nodeId]]
+    }}, [sourceTraceIndex]);
+    Plotly.restyle(plot, {{
+      x: [targetPoints.map((item) => item.x)],
+      y: [targetPoints.map((item) => item.y)],
+      text: [targetPoints.map((item) => item.label)],
+      customdata: [targetIds]
+    }}, [targetTraceIndex]);
+    Plotly.restyle(plot, {{
+      x: [targetPoints.map((item) => item.x)],
+      y: [targetPoints.map((item) => item.y)],
+      text: [targetPoints.map((item) => item.label)]
+    }}, [labelTraceIndex]);
+    plot.dataset.activeReplicaSourceId = nodeId;
+  }}
+
+  plot.on('plotly_click', function(event) {{
+    const point = event && event.points && event.points[0];
+    if (!point) return;
+    const nodeId = point.customdata || point.text;
+    if (!nodeId || !interaction.source_targets[nodeId]) return;
+    if (plot.dataset.activeReplicaSourceId === nodeId) {{
+      clearSelection();
+      return;
+    }}
+    highlightSource(nodeId);
+  }});
+
+  plot.on('plotly_doubleclick', function() {{
+    clearSelection();
+    return false;
+  }});
+}})();
+"""
+
+
 def _topology_node_traces(
     g: nx.Graph,
     pos: dict[Any, tuple[float, float]],
     title: str,
     *,
     idle_ssu_color: str | None = None,
-) -> tuple[go.Scatter, go.Scatter, go.Scatter, list[str], list[float]]:
-    node_ids = [str(node_id) for node_id in g.nodes()]
+) -> tuple[go.Scatter, go.Scatter, go.Scatter, list[str], list[float], list[str]]:
+    node_ids = [str(node_id) for node_id in g.nodes() if str(node_id) in pos]
     node_x: list[float] = []
     node_y: list[float] = []
     node_color: list[str] = []
@@ -1062,7 +1263,12 @@ def _topology_node_traces(
             node_color.append(idle_ssu_color)
         else:
             node_color.append(_node_color(node_data))
-        node_size.append(11 if node_data.get("node_role") == "ssu" else 14)
+        if node_data.get("node_role") == "ssu":
+            node_size.append(11)
+        elif node_data.get("node_role") == "dpu":
+            node_size.append(12)
+        else:
+            node_size.append(14)
         node_opacity.append(_df_plane_node_opacity(g, node_data) if show_df_union_labels else 1.0)
         node_text.append(
             "<br>".join(
@@ -1129,7 +1335,7 @@ def _topology_node_traces(
         showlegend=False,
         name="server-labels",
     )
-    return base_nodes, union_labels, server_labels, node_ids, node_opacity
+    return base_nodes, union_labels, server_labels, node_ids, node_opacity, node_color
 
 
 def _hardware_legend_traces(g: nx.Graph) -> list[go.Scatter]:
@@ -1163,12 +1369,17 @@ def _topology_subtitle(
     communication_metrics: dict[str, dict[str, float]],
 ) -> str:
     a2a = communication_metrics["A2A"]
-    sparse = communication_metrics["Sparse 1-to-N"]
+    replica = communication_metrics.get("Replica-3 Topology-Aware")
+    replica_text = (
+        f"3-Replica Aware: {replica['per_ssu_throughput_gbps']:.2f} Gbps"
+        if replica is not None
+        else ""
+    )
     return (
         f"Diameter: {structural_metrics['diameter']:.0f} | "
         f"Avg Hops: {structural_metrics['average_hops']:.2f} | "
-        f"A2A Throughput: {a2a['per_ssu_throughput_gbps']:.2f} Gbps | "
-        f"{display_workload_name('Sparse 1-to-N')} P95: {sparse['completion_time_p95_s'] * 1e3:.2f} ms"
+        f"A2A Throughput: {a2a['per_ssu_throughput_gbps']:.2f} Gbps"
+        + (f" | {replica_text}" if replica_text else "")
     )
 
 
@@ -1330,6 +1541,8 @@ def _traffic_edge_traces(
     for left, right in g.edges():
         left = str(left)
         right = str(right)
+        if left not in pos or right not in pos:
+            continue
         edge_data = g.get_edge_data(left, right) or {}
         bandwidth_gbps = float(edge_data.get("bandwidth_gbps", 0.0))
         parallel_links = max(1, int(edge_data.get("parallel_links", 1)))
@@ -1488,7 +1701,7 @@ def create_topology_figure(
         showlegend=False,
         name="highlight-edge-labels",
     )
-    base_nodes, union_labels, server_labels, node_ids, node_opacity = _topology_node_traces(
+    base_nodes, union_labels, server_labels, node_ids, node_opacity, _node_colors = _topology_node_traces(
         g,
         pos,
         topology_name,
@@ -1549,7 +1762,7 @@ def create_traffic_figure(
     workload_metrics: dict[str, float],
     traffic_details: dict[str, Any],
     layout_seed: int,
-) -> tuple[go.Figure, str]:
+) -> tuple[go.Figure, str, str | None]:
     pos = _positions(g, topology_name, layout_seed)
     traffic_edges = _traffic_edge_traces(
         g,
@@ -1559,7 +1772,7 @@ def create_traffic_figure(
         float(workload_metrics.get("completion_time_s", 0.0)),
     )
     if workload_name != "A2A":
-        base_nodes, union_labels, server_labels, _, _ = _topology_node_traces(
+        base_nodes, union_labels, server_labels, node_ids, node_opacity, node_colors = _topology_node_traces(
             g,
             pos,
             topology_name,
@@ -1567,8 +1780,58 @@ def create_traffic_figure(
         )
         focus_traces = _sparse_focus_traces(g, pos, traffic_details)
     else:
-        base_nodes, union_labels, server_labels, _, _ = _topology_node_traces(g, pos, topology_name)
+        base_nodes, union_labels, server_labels, node_ids, node_opacity, node_colors = _topology_node_traces(
+            g,
+            pos,
+            topology_name,
+        )
         focus_traces = []
+
+    selected_source_trace = go.Scatter(
+        x=[],
+        y=[],
+        mode="markers",
+        marker=dict(
+            size=16,
+            symbol="circle",
+            color=_TRAFFIC_SOURCE_COLOR,
+            opacity=0.98,
+            line=dict(width=2.0, color="#f8fafc"),
+        ),
+        text=[],
+        customdata=[],
+        hovertemplate="Selected Ingress: %{text}<extra></extra>",
+        showlegend=False,
+        name="selected-source",
+    )
+    selected_target_trace = go.Scatter(
+        x=[],
+        y=[],
+        mode="markers",
+        marker=dict(
+            size=16,
+            symbol="circle",
+            color=_TRAFFIC_DESTINATION_COLOR,
+            opacity=0.98,
+            line=dict(width=2.0, color=_TRAFFIC_DESTINATION_RING_COLOR),
+        ),
+        text=[],
+        customdata=[],
+        hovertemplate="Selected Target: %{text}<extra></extra>",
+        showlegend=False,
+        name="selected-targets",
+    )
+    selected_target_labels = go.Scatter(
+        x=[],
+        y=[],
+        mode="text",
+        text=[],
+        textposition="top center",
+        textfont=dict(color="#f8fafc", size=11, family="Space Grotesk, Segoe UI, sans-serif"),
+        hoverinfo="skip",
+        showlegend=False,
+        name="selected-target-labels",
+    )
 
     subtitle = (
         f"Completion: {workload_metrics['completion_time_s'] * 1e3:.2f} ms | "
@@ -1582,6 +1845,9 @@ def create_traffic_figure(
             union_labels,
             server_labels,
             *focus_traces,
+            selected_source_trace,
+            selected_target_trace,
+            selected_target_labels,
         ]
     )
     _apply_figure_layout(
@@ -1589,6 +1855,7 @@ def create_traffic_figure(
         f"{display_workload_name(workload_name)} Directional Traffic",
         subtitle,
         height=560,
+        clickmode="event",
         legend_position="inside_top_right" if workload_name != "A2A" else "top",
         show_heading=False,
     )
@@ -1596,7 +1863,36 @@ def create_traffic_figure(
         f"plot-{topology_name.lower().replace(' ', '-').replace('_', '-')}"
         f"-{workload_name.lower().replace(' ', '-').replace('_', '-')}-traffic"
     )
-    return fig, plot_id
+    traffic_interaction_script: str | None = None
+    if workload_name != "A2A" and traffic_details.get("source_to_targets"):
+        interaction = _traffic_interaction_payload(
+            g,
+            pos,
+            node_ids,
+            traffic_details,
+            base_node_opacities=node_opacity,
+            base_node_colors=node_colors,
+        )
+        base_node_trace_index = len(traffic_edges)
+        focus_trace_indices = list(
+            range(
+                len(traffic_edges) + 3,
+                len(traffic_edges) + 3 + len(focus_traces),
+            )
+        )
+        source_trace_index = len(traffic_edges) + 3 + len(focus_traces)
+        target_trace_index = source_trace_index + 1
+        label_trace_index = source_trace_index + 2
+        traffic_interaction_script = _traffic_interaction_script(
+            plot_id,
+            interaction,
+            base_node_trace_index=base_node_trace_index,
+            focus_trace_indices=focus_trace_indices,
+            source_trace_index=source_trace_index,
+            target_trace_index=target_trace_index,
+            label_trace_index=label_trace_index,
+        )
+    return fig, plot_id, traffic_interaction_script
 
 
 def _join_display_names(names: list[str]) -> str:
@@ -1609,6 +1905,47 @@ def _join_display_names(names: list[str]) -> str:
     return "、".join(names[:-1]) + f"和{names[-1]}"
 
 
+def _additional_comparison_workloads(results: list[dict[str, Any]]) -> list[dict[str, str]]:
+    if not results:
+        return []
+
+    excluded = {"A2A", "Replica-3 Random", "Replica-3 Topology-Aware"}
+    first_metrics = results[0].get("communication_metrics", {})
+    workloads: list[dict[str, str]] = []
+    for workload_name in first_metrics:
+        if workload_name in excluded:
+            continue
+        if all(workload_name in item.get("communication_metrics", {}) for item in results):
+            workloads.append(
+                {
+                    "name": str(workload_name),
+                    "display_name": display_workload_name(str(workload_name)),
+                }
+            )
+    return workloads
+
+
+def _comparison_topology_tables(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    tables: list[dict[str, Any]] = []
+    for item in results:
+        rows = [
+            {
+                "display_name": display_workload_name(str(workload_name)),
+                **metrics,
+            }
+            for workload_name, metrics in item.get("communication_metrics", {}).items()
+        ]
+        if not rows:
+            continue
+        tables.append(
+            {
+                "title": str(item["display_name"]),
+                "rows": rows,
+            }
+        )
+    return tables
+
+
 def _all_topology_page_order(topology_name: str) -> int:
     order = {
         "Clos": 0,
@@ -1616,13 +1953,13 @@ def _all_topology_page_order(topology_name: str) -> int:
         "Clos-128": 2,
         "Clos-192": 3,
         "Clos-256": 4,
-        "Clos-4P-FullMesh": 5,
-        "Clos-4P-Ring": 6,
-        "2D-FullMesh": 7,
-        "2D-FullMesh-2x4": 8,
-        "2D-Torus": 9,
-        "2D-Torus-BestTwist": 10,
-        "3D-Torus": 11,
+        "2D-FullMesh": 5,
+        "2D-FullMesh-2x4": 6,
+        "2D-Torus": 7,
+        "2D-Torus-BestTwist": 8,
+        "3D-Torus": 9,
+        "Clos-4P-FullMesh": 10,
+        "Clos-4P-Ring": 11,
         "3D-Torus-BestTwist": 12,
         "3D-Torus-2x4x3": 13,
         "3D-Torus-2x4x3-BestTwist": 14,
@@ -1932,8 +2269,12 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
             layout_seed=item["layout_seed"],
         )
         traffic_plots = []
-        for workload_name in item.get("traffic_workload_names", ("A2A", "Sparse 1-to-N")):
-            traffic_fig, traffic_plot_id = create_traffic_figure(
+        traffic_plot_map: dict[str, dict[str, Any]] = {}
+        for workload_name in item.get(
+            "traffic_workload_names",
+            ("A2A", "Replica-3 Random", "Replica-3 Topology-Aware"),
+        ):
+            traffic_fig, traffic_plot_id, traffic_interaction_script = create_traffic_figure(
                 g=item["graph"],
                 topology_name=item["name"],
                 workload_name=workload_name,
@@ -1942,28 +2283,54 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
                 layout_seed=item["layout_seed"],
             )
             workload_metrics = item["communication_metrics"][workload_name]
-            traffic_plots.append(
-                {
-                    "title": f"{display_workload_name(workload_name)} Directional Traffic",
-                    "notes": [
-                        "Hover any link to inspect theoretical bandwidth plus forward and reverse carried rate, utilization, and offered volume.",
-                        "Edge color encodes the sum of forward and reverse carried rate on that link or parallel-link bundle.",
-                        "Scroll to zoom, drag to pan, and double-click to reset the view.",
-                        (
-                            f"Completion {workload_metrics['completion_time_s'] * 1e3:.2f} ms | "
-                            f"P95 {workload_metrics['completion_time_p95_s'] * 1e3:.2f} ms | "
-                            f"Max backend utilization {workload_metrics['max_link_utilization'] * 100:.1f}%"
-                        ),
-                    ],
-                    "plot_id": traffic_plot_id,
-                    "plot_html": traffic_fig.to_html(
-                        full_html=False,
-                        include_plotlyjs=False,
-                        config=_plot_config(),
-                        div_id=traffic_plot_id,
+            plot_payload = {
+                "workload": workload_name,
+                "title": f"{display_workload_name(workload_name)} Directional Traffic",
+                "notes": [
+                    "Hover any link to inspect theoretical bandwidth plus forward and reverse carried rate, utilization, and offered volume.",
+                    "Edge color encodes the sum of forward and reverse carried rate on that link or parallel-link bundle.",
+                    (
+                        "Click a DPU to highlight its destination SSUs."
+                        if item.get("show_npu_write_layout") and workload_name != "A2A"
+                        else (
+                            "Click an SSU to highlight its workload targets."
+                            if workload_name != "A2A"
+                            else "Scroll to zoom, drag to pan, and double-click to reset the view."
+                        )
                     ),
-                }
-            )
+                    "Scroll to zoom, drag to pan, and double-click to reset the view.",
+                    (
+                        f"Completion {workload_metrics['completion_time_s'] * 1e3:.2f} ms | "
+                        f"P95 {workload_metrics['completion_time_p95_s'] * 1e3:.2f} ms | "
+                        f"Max backend utilization {workload_metrics['max_link_utilization'] * 100:.1f}%"
+                    ),
+                ],
+                "plot_id": traffic_plot_id,
+                "plot_html": traffic_fig.to_html(
+                    full_html=False,
+                    include_plotlyjs=False,
+                    config=_plot_config(),
+                    div_id=traffic_plot_id,
+                ),
+                "interaction_script": traffic_interaction_script,
+            }
+            traffic_plots.append(plot_payload)
+            traffic_plot_map[workload_name] = plot_payload
+        traffic_plot_groups = []
+        for group in item.get("traffic_workload_groups", []):
+            grouped_plots = [
+                traffic_plot_map[workload_name]
+                for workload_name in group.get("workloads", [])
+                if workload_name in traffic_plot_map
+            ]
+            if grouped_plots:
+                traffic_plot_groups.append(
+                    {
+                        "title": group.get("title"),
+                        "columns": int(group.get("columns", 2)),
+                        "plots": grouped_plots,
+                    }
+                )
         blocks.append(
             {
                 "name": item["name"],
@@ -1978,11 +2345,15 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
                 "structural_metrics": item["structural_metrics"],
                 "communication_metrics": item["communication_metrics"],
                 "workload_metric_rows": item.get("workload_metric_rows", []),
+                "workload_metric_groups": item.get("workload_metric_groups", []),
+                "show_replica_panels": item.get("show_replica_panels", True),
+                "show_npu_write_layout": item.get("show_npu_write_layout", False),
                 "default_routing_highlight": item.get("default_routing_highlight"),
                 "routing_comparison": item.get("routing_comparison"),
                 "observations": item["observations"],
                 "layout_notes": _layout_notes(item["name"]),
                 "traffic_plots": traffic_plots,
+                "traffic_plot_groups": traffic_plot_groups,
                 "plot_id": plot_id,
                 "interaction_mode": "neighbors",
                 "interaction_script": _interaction_script(plot_id, interaction),
@@ -2001,6 +2372,8 @@ def render_html_dashboard(results: list[dict[str, Any]], output_path: Path) -> P
             blocks,
             key=lambda item: (_all_topology_page_order(str(item["name"])), str(item["display_name"])),
         ),
+        additional_comparison_workloads=_additional_comparison_workloads(blocks),
+        comparison_topology_tables=_comparison_topology_tables(blocks),
         comparison_summary=[],
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
